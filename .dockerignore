@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+01_0000.step
+tests/
+conftest.py
+CLAUDE.md
+architektur.md
+TER-BOX-Configurator-API-Docs.md
