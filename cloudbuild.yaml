@@ -3,6 +3,9 @@ substitutions:
   _SERVICE: terbox-cad-backend
   _REPO: terbox-configurator-backend
 
+options:
+  logging: CLOUD_LOGGING_ONLY
+
 steps:
   - name: gcr.io/cloud-builders/docker
     args:
