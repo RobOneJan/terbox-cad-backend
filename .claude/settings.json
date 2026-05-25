@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat /Users/robertmeier/Documents/Dev/terbox-cad-backend/rules.md && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"rules.md loaded above — check these rules before making changes\"}}' 2>/dev/null || true",
+            "statusMessage": "Loading assembly rules..."
+          }
+        ]
+      }
+    ]
+  }
+}

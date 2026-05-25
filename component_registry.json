@@ -1,0 +1,95 @@
+{
+  "y_corner": {
+    "step_file": "TER BOX AB1000.step",
+    "step_name": "Y-Ecke",
+    "description": "Y-Verbindungsstück 100×100",
+    "arm_length_mm": 120,
+    "article_nr": "AB-YEC-100",
+    "fixed_geometry": true,
+    "scale_axes": []
+  },
+  "k_corner": {
+    "step_file": "TER BOX AB1000.step",
+    "step_name": "K Ecke",
+    "description": "K-Verbindungsstück 100×100",
+    "arm_length_mm": 120,
+    "article_nr": "AB-KEC-100",
+    "fixed_geometry": true,
+    "scale_axes": []
+  },
+  "t_corner": {
+    "step_file": "TER BOX AB1000.step",
+    "step_name": "T Ecke",
+    "description": "T-Verbindungsstück 100×100",
+    "arm_length_mm": 120,
+    "article_nr": "AB-TEC-100",
+    "fixed_geometry": true,
+    "scale_axes": []
+  },
+  "l_corner": {
+    "step_file": "TER BOX AB1000.step",
+    "step_name": "L-Ecke",
+    "description": "L-Verbindungsstück 100×100",
+    "arm_length_mm": 120,
+    "article_nr": "AB-LEC-100",
+    "fixed_geometry": true,
+    "scale_axes": []
+  },
+  "tube_100x100": {
+    "step_file": "TER BOX AB1000.step",
+    "step_name": "Rohr mitte 210",
+    "description": "Rohr 100×100mm (Länge nach Maß)",
+    "template_length_mm": 2100,
+    "article_nr": "AB-ROH-100",
+    "fixed_geometry": false,
+    "scale_axes": [
+      "length"
+    ]
+  },
+  "roof_substructure": {
+    "step_file": "TER BOX AB1000.step",
+    "step_name": "Rohr Dach Links",
+    "description": "Dachunterkonstruktion",
+    "article_nr": "AB-DUS-001",
+    "fixed_geometry": false,
+    "scale_axes": [
+      "length",
+      "width"
+    ]
+  },
+  "roof_panel": {
+    "step_file": "TER BOX AB1000.step",
+    "step_name": "Dach Links",
+    "description": "Dachpanel",
+    "article_nr": "AB-DAC-001",
+    "fixed_geometry": false,
+    "scale_axes": [
+      "length",
+      "width"
+    ]
+  },
+  "base_plate": {
+    "step_file": "TER BOX AB1000.step",
+    "step_name": "Fussplatte",
+    "description": "Fussplatte 150×150mm",
+    "article_nr": "AB-FUS-001",
+    "fixed_geometry": true,
+    "scale_axes": []
+  },
+  "bolt_m12_120_a2": {
+    "step_file": "TER BOX AB1000.step",
+    "step_name": "Sechskantschraube JIS B 1180 - ISO 4015 - M12x120 - B Edelstahl A2 Einfach",
+    "description": "Sechskantschraube M12×120 Edelstahl A2",
+    "article_nr": "AB-SCH-M12-120-A2",
+    "fixed_geometry": true,
+    "scale_axes": []
+  },
+  "nut_m12": {
+    "step_file": "TER BOX AB1000.step",
+    "step_name": "Sechskantschraubenmutter mit abgeschrägter Grundfläche ANSI B18.6.3 - 12-24 Stahlklasse 2H Einfach",
+    "description": "Sechskantmutter M12",
+    "article_nr": "AB-MUT-M12",
+    "fixed_geometry": true,
+    "scale_axes": []
+  }
+}

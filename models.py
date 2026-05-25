@@ -149,3 +149,59 @@ class TerBoxConfiguration(BaseModel):
 class ComputedConfig(BaseModel):
     module_count: int
     module_length_cm: float
+
+# --- AB1000 box configurator ---
+
+class BoxConfig(BaseModel):
+    length_mm: float
+    width_mm: float
+    height_mm: float
+    with_roof: bool = True
+    with_floor: bool = True
+    walls: WallHeight = WallHeight.full
+    wall_material: Optional[WallMaterial] = None
+    wall_wpc_color: Optional[WpcColor] = None
+    floor_material: Optional[FloorMaterial] = None
+    floor_wpc_color: Optional[WpcColor] = None
+    roller_door: bool = False
+    roller_door_color: Optional[str] = None
+    bike_stand: bool = False
+
+    @field_validator("roller_door_color")
+    @classmethod
+    def validate_roller_door_color(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in _VALID_SHUTTER_COLORS:
+            raise ValueError(f"invalid roller_door_color: {v}")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "length_mm": 3000,
+                "width_mm": 1500,
+                "height_mm": 2200,
+                "with_roof": True,
+                "with_floor": True,
+                "walls": "full",
+                "wall_material": "wpc",
+                "wall_wpc_color": "cedar",
+                "floor_material": "wpcFloor",
+                "floor_wpc_color": "cedar",
+                "roller_door": False,
+                "roller_door_color": None,
+                "bike_stand": False,
+            }
+        }
+    }
+
+class BOMItem(BaseModel):
+    component_key: str
+    article_nr: str
+    description: str
+    qty: int
+    length_mm: Optional[float] = None
+    note: Optional[str] = None
+
+class BOMResponse(BaseModel):
+    items: List[BOMItem]
+    total_parts: int
