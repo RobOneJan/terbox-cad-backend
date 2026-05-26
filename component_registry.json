@@ -91,5 +91,45 @@
     "article_nr": "AB-MUT-M12",
     "fixed_geometry": true,
     "scale_axes": []
+  },
+  "schiene": {
+    "description": "Schiene C-Profil 18×38mm (Länge nach Maß)",
+    "article_nr": "AB-SCH-1838",
+    "fixed_geometry": false,
+    "scale_axes": ["length"]
+  },
+  "wall_panel": {
+    "description": "Wandpaneel 30mm (Abmessung nach Maß)",
+    "article_nr": "AB-WAN-001",
+    "fixed_geometry": false,
+    "scale_axes": ["length", "width"]
+  },
+  "floor_panel": {
+    "description": "Bodenpaneel 30mm (Abmessung nach Maß)",
+    "article_nr": "AB-BOD-001",
+    "fixed_geometry": false,
+    "scale_axes": ["length", "width"]
+  },
+  "bike_stand_rail": {
+    "step_file": "TER BOX 100x100.step",
+    "step_name": "Fahrradständer Befestigung",
+    "description": "Fahrradständer Befestigung (Breite nach Maß)",
+    "article_nr": "AB-FAH-001",
+    "fixed_geometry": false,
+    "scale_axes": ["length"]
+  },
+  "bike_stand": {
+    "step_file": "TER BOX 100x100.step",
+    "step_name": "Fahrradständer 40*40",
+    "description": "Fahrradständer 40×40 (Breite nach Maß)",
+    "article_nr": "AB-FAH-002",
+    "fixed_geometry": false,
+    "scale_axes": ["length"]
+  },
+  "roller_door": {
+    "description": "Rolltor (Breite nach Maß)",
+    "article_nr": "AB-ROL-001",
+    "fixed_geometry": false,
+    "scale_axes": ["length"]
   }
 }

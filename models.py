@@ -165,7 +165,6 @@ class BoxConfig(BaseModel):
     floor_wpc_color: Optional[WpcColor] = None
     roller_door: bool = False
     roller_door_color: Optional[str] = None
-    bike_stand: bool = False
 
     @field_validator("roller_door_color")
     @classmethod
@@ -189,7 +188,6 @@ class BoxConfig(BaseModel):
                 "floor_wpc_color": "cedar",
                 "roller_door": False,
                 "roller_door_color": None,
-                "bike_stand": False,
             }
         }
     }

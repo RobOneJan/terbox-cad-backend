@@ -71,9 +71,24 @@
 ---
 
 ## Roof
-- Spans the inner top frame. Slopes toward the back (water runoff).
-- Scaled along X to `L − 2 × o` and along Y to `W − 2 × o`.
-- Top face sits just above the top tube center height.
+Two components — both always rendered when `with_roof = true`.
+
+### Roof substructure (`Rohr Dach Links` — rendered as `Dach_Unterkonstruktion`)
+- **Always present alongside the roof panel** — never omit it.
+- STEP template piece: 1600 mm wide (X) × 1469 mm deep (Y) × 85 mm tall (Z).
+- Contains **5 cross-beams** running in X, spaced **360 mm apart** in Y:
+  - Beam centres at y ≈ 145, 505, 865, 1225, 1585 mm in the template.
+  - Each beam ~30 mm wide (40×40 mm tube profile).
+- Scaled in X to `L − 2 × o` and in Y to `W − 2 × o`. Beam spacing scales proportionally.
+- Placed centre at `(L/2, W/2, H − o + t_sub/2)` — sits on top of the top frame tubes.
+- Color: steel grey.
+
+### Roof panel (`Dach Links` — rendered as `Dach`)
+- Flat/slightly-sloped panel sitting over the substructure.
+- STEP template piece: 1600 mm wide (X) × 1654 mm deep (Y) × 64 mm thick (Z).
+- Scaled in X to `L − 2 × o` and in Y to `W − 2 × o`.
+- Placed centre at `(L/2, W/2, H − o + t_panel/2)`.
+- Color: steel grey.
 
 ---
 
@@ -89,22 +104,22 @@
 - Height options: `full` (floor to ceiling between tubes), `half` (lower half only), `none`.
 - Panel thickness: 30 mm.
 
-### Panel dimensions (between tube inner faces)
-- Clear height between tubes: `panel_h_inner = H − 2 × (o + tf) = H − 190 mm`
-- Full wall: `panel_h = panel_h_inner`
-- Half wall: `panel_h = panel_h_inner / 2`
-- Panel Z center: `z_ctr = (o + tf) + panel_h / 2`
+### Panel dimensions (tube center to tube center)
+- Panels span from tube center to tube center. The Schienen (mounted at tube centers) frame all 4 edges.
+- Full wall height: `panel_h = H − 2 × o = H − 90 mm`
+- Half wall height: `panel_h = (H − 2 × o) / 2`
+- Panel Z center: `z_ctr = o + panel_h / 2`
   - Full walls: `z_ctr = H / 2`
-  - Half walls: `z_ctr = 95 + (H − 190) / 4`
+  - Half walls: `z_ctr = o + (H − 2 × o) / 4`
 
-### Panel positions
-- Back wall: `back_y = W − o − tf − wt/2 = W − 110 mm` (panel front face flush with back tube inner face)
-- Left wall: `left_x = o + tf + wt/2 = 110 mm`
-- Right wall: `right_x = L − o − tf − wt/2 = L − 110 mm`
+### Panel face positions (face sits at tube center)
+- Back wall: `back_y = W − o − wt/2` (panel back face at tube center y = W − o)
+- Left wall: `left_x = o + wt/2` (panel left face at tube center x = o)
+- Right wall: `right_x = L − o − wt/2`
 
-### Panel spans (clear between tube inner faces)
-- Back wall span: `L − 2 × (o + tf) = L − 190 mm`
-- Side wall span: `W − 2 × (o + tf) = W − 190 mm`
+### Panel spans (tube center to tube center)
+- Back wall span: `L − 2 × o = L − 90 mm`
+- Side wall span: `W − 2 × o = W − 90 mm`
 
 ### Back wall split (middle post)
 - When a structural middle post exists (`L > 2590 mm`), the back wall panel splits into two halves around the post.
@@ -117,13 +132,29 @@
 ---
 
 ## Schienen (C-channel rails)
-- Vertical C-channel rails holding the wall panel edges in place.
-- Simplified as solid boxes: 18 mm deep (into the room) × 38 mm wide × `panel_h` tall.
-- **Two Schienen per wall face** — one at each vertical edge.
-- Center position: aligned with the **tube center** (not the tube inner face).
-  - Back wall: left Schiene at `x = o`, right at `x = L − o`, both at `y = back_y`.
-  - Left wall: front Schiene at `y = o`, back at `y = W − o`, both at `x = left_x`.
-  - Right wall: front Schiene at `y = o`, back at `y = W − o`, both at `x = right_x`.
+- C-channel rails mounted centered on the surrounding tubes, fully framing each panel on all 4 sides.
+- Simplified as solid boxes: 18 mm deep × 38 mm wide (≥ panel thickness).
+- **4 Schienen per wall face**: 2 vertical (left + right edges) + 2 horizontal (bottom + top edges).
+- All Schienen centered on the tube center axis — the panel edges terminate at the tube center, inside the Schiene groove.
+
+### Back wall Schienen
+| Rail | Dimensions | Center position |
+|------|-----------|-----------------|
+| Left vertical | `18 × 38 × panel_h` | `(o, back_y, z_ctr)` |
+| Right vertical | `18 × 38 × panel_h` | `(L−o, back_y, z_ctr)` |
+| Bottom horizontal | `(L−2o) × 38 × 18` | `(L/2, back_y, o)` |
+| Top horizontal | `(L−2o) × 38 × 18` | `(L/2, back_y, H−o)` |
+
+### Left wall Schienen
+| Rail | Dimensions | Center position |
+|------|-----------|-----------------|
+| Front vertical | `38 × 18 × panel_h` | `(left_x, o, z_ctr)` |
+| Back vertical | `38 × 18 × panel_h` | `(left_x, W−o, z_ctr)` |
+| Bottom horizontal | `38 × (W−2o) × 18` | `(left_x, W/2, o)` |
+| Top horizontal | `38 × (W−2o) × 18` | `(left_x, W/2, H−o)` |
+
+### Right wall: same pattern as left wall at `x = right_x`.
+
 - Color: steel grey (same as tubes and connectors).
 - Added for all wall types (`full` and `half`) whenever walls are present.
 
@@ -135,5 +166,11 @@
 - Sits outside the front face of the box: `y = o − tf − housing_depth/2`.
 
 ## Bike Stand
-- Mounting rail spanning the full box width, sitting on the floor inside the rear of the box.
-- Individual stand units spaced at ≥ 750 mm intervals, count = `floor((L − 2 × o) / 750)`.
+- **Always present** — not a configurable option, rendered for every box.
+- Two components from the TER BOX 100×100 STEP file:
+  1. **Mounting rail** (`Fahrradständer Befestigung`): one piece, scaled in X to `total_w = L − 2 × o`, centered at `(L/2, W − (o + 50) − 22, o + rail_height/2)`.
+  2. **Stand assembly** (`Fahrradständer 40*40`): one piece, scaled in X to `total_w`. The STEP component is 2300 mm wide (full template-box assembly). Scaling it proportionally to `total_w` preserves the internal slot geometry.
+- Both pieces share the same Y and Z positions; the stand assembly sits just in front of the mounting rail near the back wall.
+- The STEP stand assembly contains ~3 bike slots at ~767 mm spacing in the 2300 mm template. Scaled to any box width, slot spacing = `total_w / 3` approximately.
+- Minimum useful box width: 750 mm clear span — any standard box satisfies this.
+- Do **not** replicate the stand assembly n times. Scale once to `total_w` and place as a single instance.

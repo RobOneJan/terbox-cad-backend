@@ -27,7 +27,6 @@ _BOX_EXAMPLES = {
             "walls": "full", "wall_material": "corrugatedSheet",
             "floor_material": "woodFloor",
             "roller_door": True, "roller_door_color": "ral9005",
-            "bike_stand": False,
         },
     },
     "bike_storage": {
@@ -37,7 +36,7 @@ _BOX_EXAMPLES = {
             "with_roof": True, "with_floor": True,
             "walls": "full", "wall_material": "wpc", "wall_wpc_color": "darkGrey",
             "floor_material": "wpcFloor", "floor_wpc_color": "darkGrey",
-            "roller_door": False, "bike_stand": True,
+            "roller_door": False,
         },
     },
     "half_walls_glass": {
@@ -106,7 +105,6 @@ async def ab1000_preview(config: BoxConfig = Body(examples=_BOX_EXAMPLES)):
             floor_wpc_color=config.floor_wpc_color.value if config.floor_wpc_color else None,
             roller_door=config.roller_door,
             roller_door_color=config.roller_door_color,
-            bike_stand=config.bike_stand,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -124,8 +122,12 @@ async def ab1000_bom(config: BoxConfig = Body(examples=_BOX_EXAMPLES)):
         config.length_mm,
         config.width_mm,
         config.height_mm,
-        config.with_roof,
-        config.with_floor,
+        with_roof=config.with_roof,
+        with_floor=config.with_floor,
+        walls=config.walls.value,
+        wall_material=config.wall_material.value if config.wall_material else None,
+        floor_material=config.floor_material.value if config.floor_material else None,
+        roller_door=config.roller_door,
     )
     return BOMResponse(
         items=[BOMItem(**item) for item in items],

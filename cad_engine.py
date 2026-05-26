@@ -574,7 +574,6 @@ def generate_ab1000_preview_obj(
     floor_wpc_color: str | None = None,  # "cedar" | "darkGrey" | "teak" | "ipe" | "lightGrey"
     roller_door: bool = False,
     roller_door_color: str | None = None,  # RAL code e.g. "ral9005"
-    bike_stand: bool = False,
 ) -> str:
     if not _AB_TEMPLATE_PATH.exists():
         raise FileNotFoundError(f"STEP template not found at {_AB_TEMPLATE_PATH}")
@@ -687,15 +686,39 @@ def generate_ab1000_preview_obj(
 
     # --- Roof: spans top frame, scales with box L×W ---
     if with_roof:
-        rv, rf = None, None
-        for key,(verts,faces,tx,ty,tz) in _ab_instances.items():
-            if key.split("__")[0] == "Dach Links" and verts:
+        rv, rf   = None, None   # roof panel (Dach Links)
+        sub_v, sub_f = None, None  # roof substructure (Rohr Dach Links)
+        for key, (verts, faces, tx, ty, tz) in _ab_instances.items():
+            base = key.split("__")[0]
+            if base == "Dach Links" and rv is None and verts:
                 rv, rf = _center_bbox(verts), faces
+            elif base == "Rohr Dach Links" and sub_v is None and verts:
+                sub_v, sub_f = _center_bbox(verts), faces
+            if rv is not None and sub_v is not None:
                 break
-        if rv:
-            rv_s = _scale_along(_scale_along(rv, "x", L-2*o), "y", W-2*o)
-            t_half = (max(v[2] for v in rv_s) - min(v[2] for v in rv_s)) / 2
-            instances.append(("Dach", _place(rv_s, L/2, W/2, H-o+t_half), rf, _STEEL_RGB))
+        # Offsets measured from STEP: both components centered relative to top-tube centre (H-o)
+        _SUB_CZ   = -5.3   # substructure bbox-centre is 5.3 mm below H-o
+        _PANEL_CZ =  7.2   # panel bbox-centre is 7.2 mm above H-o
+        # → the two pieces overlap ~62 mm in Z; the panel rests on the substructure cross-beams
+
+        if sub_v is not None:
+            sub_s = _scale_along(_scale_along(sub_v, "x", L - 2*o), "y", W - 2*o)
+            instances.append(("Dach_Unterkonstruktion",
+                               _place(sub_s, L/2, W/2, H - o + _SUB_CZ), sub_f, _STEEL_RGB))
+        if rv is not None:
+            rv_s = _scale_along(_scale_along(rv, "x", L - 2*o), "y", W - 2*o)
+            instances.append(("Dach", _place(rv_s, L/2, W/2, H - o + _PANEL_CZ), rf, _STEEL_RGB))
+
+        # Bolts connecting panel to substructure beams
+        # 5 beams equally spaced in Y (o → W-o), 2 bolt columns in X, bolt spans overlap zone
+        bolt_cz = H - o + (_SUB_CZ + _PANEL_CZ) / 2   # ≈ H-o+1, midpoint of overlap
+        bv, bf  = _make_box(20.0, 20.0, 60.0)
+        beam_ys = [o + i * (W - 2*o) / 4 for i in range(5)]
+        bolt_xs = [o + (L - 2*o) / 3, o + 2 * (L - 2*o) / 3]
+        for bi, by in enumerate(beam_ys):
+            for xi, bx in enumerate(bolt_xs):
+                instances.append((f"Bolt_Dach_{bi}_{xi}",
+                                   _place(bv, bx, by, bolt_cz), bf, _STEEL_RGB))
 
     # --- Floor: sits inside bottom frame at tube-center height ---
     if with_floor:
@@ -712,13 +735,12 @@ def generate_ab1000_preview_obj(
     if walls != "none":
         _wt  = 30.0   # panel thickness
         _pw  = 100.0  # middle post width (matches tube cross-section)
-        tf   = 50.0   # tube half-width
-        panel_h_inner = H - 2 * (o + tf)   # clear height between tube inner faces
-        panel_h = panel_h_inner / 2 if walls == "half" else panel_h_inner
-        z_ctr   = (o + tf) + panel_h / 2
-        back_y  = W - o - tf - _wt / 2
-        left_x  = o + tf + _wt / 2
-        right_x = L - o - tf - _wt / 2
+        # Panels span tube-center to tube-center; Schienen (mounted at tube centers) frame the edges
+        panel_h = (H - 2 * o) / 2 if walls == "half" else H - 2 * o
+        z_ctr   = o + panel_h / 2
+        back_y  = W - o - _wt / 2   # panel face flush with back tube center
+        left_x  = o + _wt / 2       # panel face flush with left tube center
+        right_x = L - o - _wt / 2   # panel face flush with right tube center
         w_rgb = _wall_rgb(wall_material, wall_wpc_color)
 
         def _panel_items(name, lx, ly, lz, cx, cy, cz, corr_axis="x"):
@@ -730,7 +752,7 @@ def generate_ab1000_preview_obj(
             return [(name, _place(pv, cx, cy, cz), pf, w_rgb)]
 
         def _panels_back():
-            span = L - 2 * (o + tf)
+            span = L - 2 * o
             if _needs_mid_post:
                 half = (span - _pw) / 2
                 cx_l = L/2 - _pw/2 - half/2
@@ -745,7 +767,7 @@ def generate_ab1000_preview_obj(
                 instances.extend(_panel_items("Wand_Hinten", span, _wt, panel_h, L/2, back_y, z_ctr))
 
         def _panels_side(x_pos, label):
-            span = W - 2 * (o + tf)
+            span = W - 2 * o
             if span > 2500.0:
                 half = (span - _pw) / 2
                 cy_v = W/2 - _pw/2 - half/2
@@ -761,20 +783,30 @@ def generate_ab1000_preview_obj(
         _panels_side(left_x,  "Links")
         _panels_side(right_x, "Rechts")
 
-        # Schienen: C-channel rails on tube inner faces, holding panel edges in place
-        _sd, _sw = 18.0, 38.0  # rail depth (into room from tube face) and outer width
-        sv_xz, sf_xz = _make_box(_sd, _sw, panel_h)  # vertical rail attached to X-face tube
-        sv_yz, sf_yz = _make_box(_sw, _sd, panel_h)  # vertical rail attached to Y-face tube
+        # Schienen: C-channel rails centered on tubes, fully framing each panel on all 4 sides
+        _sd, _sw = 18.0, 38.0  # rail depth and outer width (≥ panel thickness)
+        # Back wall: vertical rails on left/right tubes, horizontal rails on bottom/top tubes
+        sv_b,  sf_b  = _make_box(_sd, _sw, panel_h)       # vertical, depth in X
+        sh_b,  sf_hb = _make_box(L - 2*o, _sw, _sd)       # horizontal, depth in Z
+        # Side walls: vertical rails on front/back tubes, horizontal rails on bottom/top tubes
+        sv_s,  sf_s  = _make_box(_sw, _sd, panel_h)       # vertical, depth in Y
+        sh_s,  sf_hs = _make_box(_sw, W - 2*o, _sd)       # horizontal, depth in Z
         instances += [
-            # Back wall: centered on left and right vertical tubes
-            ("Schiene_Hinten_L", _place(sv_xz, o,   back_y, z_ctr), sf_xz, _STEEL_RGB),
-            ("Schiene_Hinten_R", _place(sv_xz, L-o, back_y, z_ctr), sf_xz, _STEEL_RGB),
-            # Left wall: centered on front and back vertical tubes
-            ("Schiene_Links_V",  _place(sv_yz, left_x,  o,   z_ctr), sf_yz, _STEEL_RGB),
-            ("Schiene_Links_H",  _place(sv_yz, left_x,  W-o, z_ctr), sf_yz, _STEEL_RGB),
-            # Right wall: centered on front and back vertical tubes
-            ("Schiene_Rechts_V", _place(sv_yz, right_x, o,   z_ctr), sf_yz, _STEEL_RGB),
-            ("Schiene_Rechts_H", _place(sv_yz, right_x, W-o, z_ctr), sf_yz, _STEEL_RGB),
+            # Back wall
+            ("Schiene_Hinten_L",   _place(sv_b,  o,   back_y, z_ctr), sf_b,  _STEEL_RGB),
+            ("Schiene_Hinten_R",   _place(sv_b,  L-o, back_y, z_ctr), sf_b,  _STEEL_RGB),
+            ("Schiene_Hinten_Bot", _place(sh_b,  L/2, back_y, o    ), sf_hb, _STEEL_RGB),
+            ("Schiene_Hinten_Top", _place(sh_b,  L/2, back_y, H-o  ), sf_hb, _STEEL_RGB),
+            # Left wall
+            ("Schiene_Links_V",    _place(sv_s,  left_x, o,   z_ctr), sf_s,  _STEEL_RGB),
+            ("Schiene_Links_H",    _place(sv_s,  left_x, W-o, z_ctr), sf_s,  _STEEL_RGB),
+            ("Schiene_Links_Bot",  _place(sh_s,  left_x, W/2, o    ), sf_hs, _STEEL_RGB),
+            ("Schiene_Links_Top",  _place(sh_s,  left_x, W/2, H-o  ), sf_hs, _STEEL_RGB),
+            # Right wall
+            ("Schiene_Rechts_V",   _place(sv_s,  right_x, o,   z_ctr), sf_s,  _STEEL_RGB),
+            ("Schiene_Rechts_H",   _place(sv_s,  right_x, W-o, z_ctr), sf_s,  _STEEL_RGB),
+            ("Schiene_Rechts_Bot", _place(sh_s,  right_x, W/2, o    ), sf_hs, _STEEL_RGB),
+            ("Schiene_Rechts_Top", _place(sh_s,  right_x, W/2, H-o  ), sf_hs, _STEEL_RGB),
         ]
 
     # --- Roller door (open / rolled-up, housing on outside of front top tube) ---
@@ -789,35 +821,30 @@ def generate_ab1000_preview_obj(
         hz = H - o - hh / 2    # hangs just below top-tube centreline
         instances.append(("Rolltor_Gehaeuse", _place(hv, L/2, hy, hz), hf, housing_rgb))
 
-    # --- Bike stand (Fahrradständer 40×40 + mounting rail from 100×100 STEP) ---
-    if bike_stand:
-        _load()
-        stand_rgb = (0.62, 0.62, 0.64)
-        total_w = L - 2 * o
+    # --- Bike stands (always present) ---
+    _load()
+    stand_rgb = (0.62, 0.62, 0.64)
+    total_w = L - 2 * o
 
-        # Mounting rail — one piece spanning the full box width
-        rv, rf = _components.get("Fahrradständer Befestigung", (None, None))
-        if rv:
-            rv = _center_bbox(rv)
-            rv = _scale_along(rv, "x", total_w)
-            rz = max(v[2] for v in rv) - min(v[2] for v in rv)
-            instances.append(("Fahrradstaender_Halterung",
-                               _place(rv, L/2, W - (o + 50) - 22.0, o + rz / 2), rf, stand_rgb))
+    # Mounting rail — one piece spanning the full box width
+    rv, rf = _components.get("Fahrradständer Befestigung", (None, None))
+    if rv:
+        rv = _center_bbox(rv)
+        rv = _scale_along(rv, "x", total_w)
+        rz = max(v[2] for v in rv) - min(v[2] for v in rv)
+        instances.append(("Fahrradstaender_Halterung",
+                           _place(rv, L/2, W - (o + 50) - 22.0, o + rz / 2), rf, stand_rgb))
 
-        # Individual stand units: each slot ≥ 750 mm, count = floor(total_w / 750)
-        sv, sf = _components.get("Fahrradständer 40*40", (None, None))
-        if sv:
-            sv = _center_bbox(sv)
-            n = max(1, int(total_w / 750.0))
-            slot_w = total_w / n
-            sz = max(v[2] for v in sv) - min(v[2] for v in sv)
-            cy_s = W - (o + 50) - 240.0
-            cz_s = o + sz / 2
-            unit_v = _scale_along(sv, "x", slot_w)
-            for i in range(n):
-                cx_i = o + slot_w * (i + 0.5)
-                instances.append((f"Fahrradstaender_{i + 1}",
-                                   _place(unit_v, cx_i, cy_s, cz_s), sf, stand_rgb))
+    # Individual stand units: each slot ≥ 750 mm, count = floor(total_w / 750)
+    sv, sf = _components.get("Fahrradständer 40*40", (None, None))
+    if sv:
+        sv = _center_bbox(sv)
+        sv = _scale_along(sv, "x", total_w)
+        sz = max(v[2] for v in sv) - min(v[2] for v in sv)
+        cy_s = W - (o + 50) - 240.0
+        cz_s = o + sz / 2
+        instances.append(("Fahrradstaender",
+                           _place(sv, L / 2, cy_s, cz_s), sf, stand_rgb))
 
     # --- Write OBJ ---
     lines = [f"# TER BOX AB1000 {L:.0f}x{W:.0f}x{H:.0f} mm"]
