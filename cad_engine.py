@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Optional, Dict, Tuple, List
 import json
+import struct
 
 from models import (
     TerBoxConfiguration, ComputedConfig,
@@ -522,9 +523,74 @@ def _active_components(config):
     return active
 
 
-# --- OBJ generators ---
+# --- GLB helpers ---
 
-def generate_preview_obj(config: TerBoxConfiguration, computed: ComputedConfig) -> str:
+def _to_glb(mesh_groups: list) -> bytes:
+    """Pack mesh groups into GLB (binary glTF 2.0). Each group: (name, verts, faces, (r,g,b))."""
+    bin_data = bytearray()
+    accessors, buffer_views, meshes, nodes, materials = [], [], [], [], []
+
+    for name, verts, faces, (r, g, b) in mesh_groups:
+        if not verts or not faces:
+            continue
+
+        while len(bin_data) % 4:
+            bin_data.append(0)
+        pos_offset = len(bin_data)
+        pos_bytes = struct.pack(f"<{len(verts)*3}f", *[c for v in verts for c in v])
+        bin_data.extend(pos_bytes)
+
+        while len(bin_data) % 4:
+            bin_data.append(0)
+        idx_offset = len(bin_data)
+        flat_idx = [i for f in faces for i in f]
+        idx_bytes = struct.pack(f"<{len(flat_idx)}I", *flat_idx)
+        bin_data.extend(idx_bytes)
+
+        xs = [v[0] for v in verts]; ys = [v[1] for v in verts]; zs = [v[2] for v in verts]
+
+        pos_bv = len(buffer_views)
+        buffer_views.append({"buffer": 0, "byteOffset": pos_offset, "byteLength": len(pos_bytes), "target": 34962})
+        idx_bv = len(buffer_views)
+        buffer_views.append({"buffer": 0, "byteOffset": idx_offset, "byteLength": len(idx_bytes), "target": 34963})
+
+        pos_acc = len(accessors)
+        accessors.append({"bufferView": pos_bv, "componentType": 5126, "count": len(verts), "type": "VEC3",
+                           "min": [min(xs), min(ys), min(zs)], "max": [max(xs), max(ys), max(zs)]})
+        idx_acc = len(accessors)
+        accessors.append({"bufferView": idx_bv, "componentType": 5125, "count": len(flat_idx), "type": "SCALAR"})
+
+        mat_idx = len(materials)
+        materials.append({"name": name, "pbrMetallicRoughness": {
+            "baseColorFactor": [r, g, b, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.8}})
+
+        mesh_idx = len(meshes)
+        meshes.append({"name": name, "primitives": [{"attributes": {"POSITION": pos_acc},
+                                                       "indices": idx_acc, "material": mat_idx}]})
+        nodes.append({"mesh": mesh_idx, "name": name})
+
+    gltf = {
+        "asset": {"version": "2.0", "generator": "TerBox CAD"},
+        "scene": 0,
+        "scenes": [{"nodes": list(range(len(nodes)))}],
+        "nodes": nodes, "meshes": meshes, "materials": materials,
+        "accessors": accessors, "bufferViews": buffer_views,
+        "buffers": [{"byteLength": len(bin_data)}],
+    }
+
+    json_bytes = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
+    json_chunk = json_bytes + b" " * ((4 - len(json_bytes) % 4) % 4)
+    bin_chunk  = bytes(bin_data) + b"\x00" * ((4 - len(bin_data) % 4) % 4)
+
+    total_len = 12 + 8 + len(json_chunk) + 8 + len(bin_chunk)
+    return (struct.pack("<III", 0x46546C67, 2, total_len)
+            + struct.pack("<II", len(json_chunk), 0x4E4F534A) + json_chunk
+            + struct.pack("<II", len(bin_chunk),  0x004E4942) + bin_chunk)
+
+
+# --- GLB generators ---
+
+def generate_preview_glb(config: TerBoxConfiguration, computed: ComputedConfig) -> bytes:
     if not _TEMPLATE_PATH.exists():
         raise FileNotFoundError(f"STEP template not found at {_TEMPLATE_PATH}")
     _load()
@@ -544,24 +610,17 @@ def generate_preview_obj(config: TerBoxConfiguration, computed: ComputedConfig) 
     s_depth  = (width_cm*10)/th/1000 if th else 0.001
 
     active = set(_active_components(config))
-    lines = [f"# TER BOX {length_cm:.0f} x {width_cm:.0f} x {height_cm:.0f} cm"]
-    vertex_offset = 1
+    mesh_groups = []
     for name, (verts, faces) in _components.items():
         if name not in active or not verts: continue
-        r,g,col_b = _component_color(name, config)
-        color_name = _component_color_name(name, config)
-        base_name = name.strip().replace(' ','_')
-        group_name = f"{base_name}_{color_name}" if color_name else base_name
-        lines.append(f"g {group_name}")
-        for x,y,z in verts:
-            lines.append(f"v {x*s_length:.6f} {z*s_height:.6f} {y*s_depth:.6f} {r:.3f} {g:.3f} {col_b:.3f}")
-        for fa,fb,fc in faces:
-            lines.append(f"f {vertex_offset+fa} {vertex_offset+fb} {vertex_offset+fc}")
-        vertex_offset += len(verts)
-    return "\n".join(lines)
+        r, g, col_b = _component_color(name, config)
+        # Remap STEP axes (Z-up) to glTF Y-up: output (x, y, z) = (x*sl, z*sh, y*sd)
+        transformed = [(x*s_length, z*s_height, y*s_depth) for x,y,z in verts]
+        mesh_groups.append((name.strip().replace(' ', '_'), transformed, faces, (r, g, col_b)))
+    return _to_glb(mesh_groups)
 
 
-def generate_ab1000_preview_obj(
+def generate_ab1000_preview_glb(
     length_mm: float,
     width_mm:  float,
     height_mm: float,
@@ -574,7 +633,7 @@ def generate_ab1000_preview_obj(
     floor_wpc_color: str | None = None,  # "cedar" | "darkGrey" | "teak" | "ipe" | "lightGrey"
     roller_door: bool = False,
     roller_door_color: str | None = None,  # RAL code e.g. "ral9005"
-) -> str:
+) -> bytes:
     if not _AB_TEMPLATE_PATH.exists():
         raise FileNotFoundError(f"STEP template not found at {_AB_TEMPLATE_PATH}")
     _load_ab()
@@ -846,16 +905,10 @@ def generate_ab1000_preview_obj(
         instances.append(("Fahrradstaender",
                            _place(sv, L / 2, cy_s, cz_s), sf, stand_rgb))
 
-    # --- Write OBJ ---
-    lines = [f"# TER BOX AB1000 {L:.0f}x{W:.0f}x{H:.0f} mm"]
-    vertex_offset = 1
-    for name, verts, faces, rgb in instances:
-        if not verts: continue
-        lines.append(f"g {name.replace(' ','_')}")
-        r, g, b = rgb
-        for x,y,z in verts:
-            lines.append(f"v {x/1000:.6f} {z/1000:.6f} {y/1000:.6f} {r:.3f} {g:.3f} {b:.3f}")
-        for fa,fb,fc in faces:
-            lines.append(f"f {vertex_offset+fa} {vertex_offset+fb} {vertex_offset+fc}")
-        vertex_offset += len(verts)
-    return "\n".join(lines)
+    # --- Write GLB ---
+    # Convert mm → m and remap STEP axes (Z-up) to glTF Y-up: output (x, y, z) = (x/1000, z/1000, y/1000)
+    mesh_groups = [
+        (name.replace(' ', '_'), [(x/1000, z/1000, y/1000) for x,y,z in verts], faces, rgb)
+        for name, verts, faces, rgb in instances if verts
+    ]
+    return _to_glb(mesh_groups)

@@ -79,20 +79,20 @@ async def verify_api_key(key: str = Security(_api_key_header)):
 async def preview(config: TerBoxConfiguration):
     computed = rules.compute_config(config)
     try:
-        obj_content = cad_engine.generate_preview_obj(config, computed)
+        glb_content = cad_engine.generate_preview_glb(config, computed)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return Response(
-        content=obj_content,
-        media_type="model/obj",
-        headers={"Content-Disposition": "attachment; filename=preview.obj"},
+        content=glb_content,
+        media_type="model/gltf-binary",
+        headers={"Content-Disposition": "attachment; filename=preview.glb"},
     )
 
 
 @app.post("/ab1000/preview", dependencies=[Depends(verify_api_key)])
 async def ab1000_preview(config: BoxConfig = Body(examples=_BOX_EXAMPLES)):
     try:
-        obj_content = cad_engine.generate_ab1000_preview_obj(
+        glb_content = cad_engine.generate_ab1000_preview_glb(
             length_mm=config.length_mm,
             width_mm=config.width_mm,
             height_mm=config.height_mm,
@@ -109,9 +109,9 @@ async def ab1000_preview(config: BoxConfig = Body(examples=_BOX_EXAMPLES)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return Response(
-        content=obj_content,
-        media_type="model/obj",
-        headers={"Content-Disposition": "attachment; filename=ab1000_preview.obj"},
+        content=glb_content,
+        media_type="model/gltf-binary",
+        headers={"Content-Disposition": "attachment; filename=ab1000_preview.glb"},
     )
 
 
