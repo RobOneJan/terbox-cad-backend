@@ -156,6 +156,13 @@ class BoxConfig(BaseModel):
     length_mm: float
     width_mm: float
     height_mm: float
+
+    @model_validator(mode="after")
+    def clamp_dimensions(self) -> "BoxConfig":
+        self.length_mm = min(self.length_mm, 12000.0)
+        self.width_mm  = min(self.width_mm,   2500.0)
+        self.height_mm = min(self.height_mm,  3000.0)
+        return self
     with_roof: bool = True
     with_floor: bool = True
     walls: WallHeight = WallHeight.full

@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Optional, Dict, Tuple, List
 import json
+import math
 import struct
 
 from models import (
@@ -687,7 +688,17 @@ def generate_ab1000_preview_glb(
     # --- Tubes: 100×100mm box, junction-to-junction length ---
     # Arm opening center is 75mm offset from junction center in each perp axis (measured from STEP).
     # Tube cross-section center must match arm opening center exactly.
-    _needs_mid_post = L - 2 * o > 2500.0
+    #
+    # Middle posts: threshold depends on box depth.
+    #   width_mm > 1500 → first post when inner span > 2500 mm
+    #   width_mm ≤ 1500 → first post when inner span > 3500 mm
+    # Subsequent posts every 2500 mm in both cases.
+    _inner_span     = L - 2 * o
+    _first_threshold = 2500.0 if width_mm > 1500.0 else 3500.0
+    n_mid_posts = max(0, math.ceil(max(0.0, _inner_span - _first_threshold) / 2500.0))
+    _seg = _inner_span / (n_mid_posts + 1) if n_mid_posts > 0 else _inner_span
+    post_xs = [o + _seg * (i + 1) for i in range(n_mid_posts)]
+
     for axis, length, tube_positions in [
         ("x", L-2*a, [(L/2,   o,   o), (L/2, W-o,   o), (L/2,   o, H-o), (L/2, W-o, H-o)]),
         ("y", W-2*a, [(  o, W/2,   o), (L-o, W/2,   o), (  o, W/2, H-o), (L-o, W/2, H-o)]),
@@ -697,17 +708,12 @@ def generate_ab1000_preview_glb(
         for i, pos in enumerate(tube_positions):
             if axis == "x" and i == 0 and not with_floor:
                 continue  # front bottom tube omitted when no floor
-            if axis == "x" and i in (2, 3) and _needs_mid_post:
-                continue  # top front/back tubes replaced by two split halves below
+            if axis == "x" and i in (2, 3) and n_mid_posts > 0:
+                continue  # top front/back tubes replaced by split segments below
             instances.append((f"Rohr_{axis.upper()}__{i+1}", _place(tube_v, *pos), tube_f, _STEEL_RGB))
 
-    # --- Middle posts (front + back) when box length > 2500 mm inside frame ---
-    if _needs_mid_post:
-        # Each half-tube: junctions at (a, *, H-a) and (L/2, *, H-a) → length = (L/2-a) - 2a
-        half_len  = L / 2 - 3 * a
-        cx_left   = (a + L / 2) / 2
-        cx_right  = (L / 2 + L - a) / 2
-        split_tv, split_tf = _make_tube_box("x", half_len)
+    # --- Middle posts (front + back) one per 2500mm of inner span ---
+    if n_mid_posts > 0:
         mp_v, mp_f = _make_tube_box("z", H - 2 * a)
 
         # T-Ecke flipped: template Z arm points +Z (up); at post top it must point -Z (down)
@@ -717,21 +723,27 @@ def generate_ab1000_preview_glb(
             tv_flip = [(x, y, -z) for x, y, z in tv_raw]
             tf_flip = [(fa, fc, fb) for fa, fb, fc in tf_raw]
 
-        for y_pos, label in [(o, "Vorne"), (W - o, "Hinten")]:
-            # Two split top tubes
-            instances.append((f"Rohr_X_Top_{label}_L",
-                               _place(split_tv, cx_left,  y_pos, H - o), split_tf, _STEEL_RGB))
-            instances.append((f"Rohr_X_Top_{label}_R",
-                               _place(split_tv, cx_right, y_pos, H - o), split_tf, _STEEL_RGB))
-            # Middle post tube
-            instances.append((f"Mittelpost_{label}",
-                               _place(mp_v, L / 2, y_pos, H / 2), mp_f, _STEEL_RGB))
-            # T-Ecke at top (Z-flipped so arm points down into post, X arms align with split tubes)
-            if tv_flip is not None:
-                instances.append((f"T_Ecke_{label}_Oben",
-                                   _place(tv_flip, L / 2, y_pos, H - a), tf_flip, _STEEL_RGB))
+        # Junction X positions for the top tube segments: [a, post_xs..., L-a]
+        junctions_x = [a] + list(post_xs) + [L - a]
 
-        # Fußstück under front post only — when no floor the front bottom tube is absent
+        for y_pos, label in [(o, "Vorne"), (W - o, "Hinten")]:
+            # Split top tubes: one segment per gap between junctions
+            for si in range(len(junctions_x) - 1):
+                x_l, x_r = junctions_x[si], junctions_x[si + 1]
+                seg_len = x_r - x_l - 2 * a   # tube mouth-to-mouth length
+                seg_cx  = (x_l + x_r) / 2
+                seg_tv, seg_tf = _make_tube_box("x", seg_len)
+                instances.append((f"Rohr_X_Top_{label}_{si}",
+                                   _place(seg_tv, seg_cx, y_pos, H - o), seg_tf, _STEEL_RGB))
+            # Posts and T-Eckes at each post position
+            for pi, px in enumerate(post_xs):
+                instances.append((f"Mittelpost_{label}_{pi}",
+                                   _place(mp_v, px, y_pos, H / 2), mp_f, _STEEL_RGB))
+                if tv_flip is not None:
+                    instances.append((f"T_Ecke_{label}_{pi}_Oben",
+                                       _place(tv_flip, px, y_pos, H - a), tf_flip, _STEEL_RGB))
+
+        # Fußstück under each front post when no floor (front bottom tube absent)
         if not with_floor:
             bv, bf = None, None
             for key, (verts, faces, tx, ty, tz) in _ab_instances.items():
@@ -739,9 +751,10 @@ def generate_ab1000_preview_glb(
                     bv, bf = _center_bbox(verts), faces
                     break
             if bv:
-                plate_top = max(v[2] for v in bv)  # 77.5 mm — place base at z=0, pin goes up
-                instances.append(("Fussplatte_Mittelpost_Vorne",
-                                   _place(bv, L / 2, o, plate_top), bf, _STEEL_RGB))
+                plate_top = max(v[2] for v in bv)
+                for pi, px in enumerate(post_xs):
+                    instances.append((f"Fussplatte_Mittelpost_Vorne_{pi}",
+                                       _place(bv, px, o, plate_top), bf, _STEEL_RGB))
 
     # --- Roof: spans top frame, scales with box L×W ---
     if with_roof:
@@ -792,7 +805,13 @@ def generate_ab1000_preview_glb(
 
     # --- Walls ---
     if walls != "none":
-        _wt  = 30.0   # panel thickness
+        # Panel thickness: wood=28mm, WPC=21mm, others=30mm
+        if wall_material == "realWood":
+            _wt = 28.0
+        elif wall_material == "wpc":
+            _wt = 21.0
+        else:
+            _wt = 30.0
         _pw  = 100.0  # middle post width (matches tube cross-section)
         # Panels span tube-center to tube-center; Schienen (mounted at tube centers) frame the edges
         panel_h = (H - 2 * o) / 2 if walls == "half" else H - 2 * o
@@ -811,39 +830,47 @@ def generate_ab1000_preview_glb(
             return [(name, _place(pv, cx, cy, cz), pf, w_rgb)]
 
         def _panels_back():
-            span = L - 2 * o
-            if _needs_mid_post:
-                half = (span - _pw) / 2
-                cx_l = L/2 - _pw/2 - half/2
-                cx_r = L/2 + _pw/2 + half/2
-                instances.extend(_panel_items("Wand_Hinten_L", half, _wt, panel_h, cx_l, back_y, z_ctr))
-                # Structural back middle post is added by the frame post loop above; skip wall post.
-                if not _needs_mid_post:
-                    mv, mf = _make_tube_box("z", panel_h)
-                    instances.append(("Wand_Hinten_M", _place(mv, L/2, back_y, z_ctr), mf, _STEEL_RGB))
-                instances.extend(_panel_items("Wand_Hinten_R", half, _wt, panel_h, cx_r, back_y, z_ctr))
+            if n_mid_posts > 0:
+                # One panel per gap between structural posts; post occupies _pw in X
+                for si in range(n_mid_posts + 1):
+                    x_start = post_xs[si - 1] + _pw / 2 if si > 0 else o
+                    x_end   = post_xs[si]     - _pw / 2 if si < n_mid_posts else L - o
+                    pw = x_end - x_start
+                    cx = (x_start + x_end) / 2
+                    instances.extend(_panel_items(f"Wand_Hinten_{si}", pw, _wt, panel_h, cx, back_y, z_ctr))
             else:
-                instances.extend(_panel_items("Wand_Hinten", span, _wt, panel_h, L/2, back_y, z_ctr))
+                instances.extend(_panel_items("Wand_Hinten", L - 2 * o, _wt, panel_h, L / 2, back_y, z_ctr))
 
         def _panels_side(x_pos, label):
             span = W - 2 * o
-            if span > 2500.0:
-                half = (span - _pw) / 2
-                cy_v = W/2 - _pw/2 - half/2
-                cy_h = W/2 + _pw/2 + half/2
-                instances.extend(_panel_items(f"Wand_{label}_V", _wt, half, panel_h, x_pos, cy_v, z_ctr, "y"))
-                mv, mf = _make_tube_box("z", panel_h)
-                instances.append((f"Wand_{label}_M", _place(mv, x_pos, W/2, z_ctr), mf, _STEEL_RGB))
-                instances.extend(_panel_items(f"Wand_{label}_H", _wt, half, panel_h, x_pos, cy_h, z_ctr, "y"))
+            n_posts_s = max(0, math.ceil(span / 2500.0) - 1)
+            if n_posts_s > 0:
+                seg_s = span / (n_posts_s + 1)
+                post_ys = [o + seg_s * (j + 1) for j in range(n_posts_s)]
+                for si in range(n_posts_s + 1):
+                    y_start = post_ys[si - 1] + _pw / 2 if si > 0 else o
+                    y_end   = post_ys[si]     - _pw / 2 if si < n_posts_s else W - o
+                    ph = y_end - y_start
+                    cy = (y_start + y_end) / 2
+                    instances.extend(_panel_items(f"Wand_{label}_{si}", _wt, ph, panel_h, x_pos, cy, z_ctr, "y"))
+                for j, py in enumerate(post_ys):
+                    mv, mf = _make_tube_box("z", panel_h)
+                    instances.append((f"Wand_{label}_M_{j}", _place(mv, x_pos, py, z_ctr), mf, _STEEL_RGB))
             else:
-                instances.extend(_panel_items(f"Wand_{label}", _wt, span, panel_h, x_pos, W/2, z_ctr, "y"))
+                instances.extend(_panel_items(f"Wand_{label}", _wt, span, panel_h, x_pos, W / 2, z_ctr, "y"))
 
         _panels_back()
         _panels_side(left_x,  "Links")
         _panels_side(right_x, "Rechts")
 
-        # Schienen: C-channel rails centered on tubes, fully framing each panel on all 4 sides
-        _sd, _sw = 18.0, 38.0  # rail depth and outer width (≥ panel thickness)
+        # Schienen: U-profile rails centered on tubes, framing each panel on all 4 sides
+        # Dimensions by material: wood=35×35×35×3mm, WPC=25×25×25×2mm, others=18×38mm
+        if wall_material == "realWood":
+            _sd, _sw = 35.0, 35.0
+        elif wall_material == "wpc":
+            _sd, _sw = 25.0, 25.0
+        else:
+            _sd, _sw = 18.0, 38.0
         # Back wall: vertical rails on left/right tubes, horizontal rails on bottom/top tubes
         sv_b,  sf_b  = _make_box(_sd, _sw, panel_h)       # vertical, depth in X
         sh_b,  sf_hb = _make_box(L - 2*o, _sw, _sd)       # horizontal, depth in Z
@@ -883,27 +910,51 @@ def generate_ab1000_preview_glb(
     # --- Bike stands (always present) ---
     _load()
     stand_rgb = (0.62, 0.62, 0.64)
-    total_w = L - 2 * o
+    inner_span = L - 2 * o
 
-    # Mounting rail — one piece spanning the full box width
-    rv, rf = _components.get("Fahrradständer Befestigung", (None, None))
-    if rv:
-        rv = _center_bbox(rv)
-        rv = _scale_along(rv, "x", total_w)
-        rz = max(v[2] for v in rv) - min(v[2] for v in rv)
-        instances.append(("Fahrradstaender_Halterung",
-                           _place(rv, L/2, W - (o + 50) - 22.0, o + rz / 2), rf, stand_rgb))
+    # P-shaped rack units: element contains 3 units side by side at x≈-554, +18, +590.
+    # Extract the centre unit (full P-shape in Y-Z, 40 mm wide in X) and place N copies.
+    # Natural template pitch ≈ 767 mm (2300 mm / 3 units).
+    sv_raw, sf_all = _components.get("Fahrradständer 40*40", (None, None))
+    if sv_raw:
+        sv_all = _center_bbox(sv_raw)
 
-    # Individual stand units: each slot ≥ 750 mm, count = floor(total_w / 750)
-    sv, sf = _components.get("Fahrradständer 40*40", (None, None))
-    if sv:
-        sv = _center_bbox(sv)
-        sv = _scale_along(sv, "x", total_w)
-        sz = max(v[2] for v in sv) - min(v[2] for v in sv)
+        # Centre unit occupies x ∈ (−268, +304) — between the two outer posts
+        unit_idx = [i for i, v in enumerate(sv_all) if -268.0 < v[0] < 304.0]
+        orig_to_local = {orig: loc for loc, orig in enumerate(unit_idx)}
+        unit_verts_raw = [sv_all[i] for i in unit_idx]
+
+        # Only faces whose three vertices all belong to the centre unit
+        unit_faces = [
+            (orig_to_local[a], orig_to_local[b], orig_to_local[c])
+            for a, b, c in sf_all
+            if a in orig_to_local and b in orig_to_local and c in orig_to_local
+        ]
+
+        # Re-centre the unit at x = 0
+        ux = (min(v[0] for v in unit_verts_raw) + max(v[0] for v in unit_verts_raw)) / 2
+        unit_verts = [(x - ux, y, z) for x, y, z in unit_verts_raw]
+
+        sz_u = max(v[2] for v in unit_verts) - min(v[2] for v in unit_verts)
         cy_s = W - (o + 50) - 240.0
-        cz_s = o + sz / 2
-        instances.append(("Fahrradstaender",
-                           _place(sv, L / 2, cy_s, cz_s), sf, stand_rgb))
+        cz_s = o + sz_u / 2
+
+        # Distribute N racks with equal margins at both ends; natural pitch ≈ 767 mm
+        n_racks = max(2, round(inner_span / 767.0))
+        pitch   = inner_span / (n_racks + 1)
+        for i in range(n_racks):
+            cx = o + pitch * (i + 1)
+            instances.append((f"Fahrradstaender_{i}",
+                               _place(unit_verts, cx, cy_s, cz_s), unit_faces, stand_rgb))
+
+        # Connecting bar: 40×40 mm square tube spanning the full inner length,
+        # placed at the arm-tip mounting height (cz_s+360) and depth (cy_s+220).
+        # These offsets come directly from the STEP template geometry:
+        # arm tips sit at z=+360 and y=+220 relative to the P-unit centre.
+        bar_v, bar_f = _make_tube_box("x", inner_span, width=40.0)
+        instances.append(("Fahrradstaender_Halterung",
+                           _place(bar_v, L / 2, cy_s + 220.0, cz_s + 360.0),
+                           bar_f, stand_rgb))
 
     # --- Write GLB ---
     # Convert mm → m and remap STEP axes (Z-up) to glTF Y-up: output (x, y, z) = (x/1000, z/1000, y/1000)
