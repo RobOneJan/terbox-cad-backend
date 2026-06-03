@@ -39,16 +39,6 @@ _BOX_EXAMPLES = {
             "roller_door": False,
         },
     },
-    "half_walls_glass": {
-        "summary": "Wide box – half glass walls, wood floor, no door",
-        "value": {
-            "length_mm": 3000, "width_mm": 2800, "height_mm": 2200,
-            "with_roof": True, "with_floor": True,
-            "walls": "half", "wall_material": "glass",
-            "floor_material": "woodFloor",
-            "roller_door": False,
-        },
-    },
 }
 
 app = FastAPI(title="TER BOX CAD Backend", version="1.0.0")
@@ -126,8 +116,11 @@ async def ab1000_bom(config: BoxConfig = Body(examples=_BOX_EXAMPLES)):
         with_floor=config.with_floor,
         walls=config.walls.value,
         wall_material=config.wall_material.value if config.wall_material else None,
+        wall_wpc_color=config.wall_wpc_color.value if config.wall_wpc_color else None,
         floor_material=config.floor_material.value if config.floor_material else None,
+        floor_wpc_color=config.floor_wpc_color.value if config.floor_wpc_color else None,
         roller_door=config.roller_door,
+        roller_door_color=config.roller_door_color,
     )
     return BOMResponse(
         items=[BOMItem(**item) for item in items],

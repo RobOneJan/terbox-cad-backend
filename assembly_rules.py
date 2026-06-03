@@ -28,8 +28,11 @@ def bom_for_box(
     with_floor: bool = True,
     walls: str = "full",           # "full" | "half" | "none"
     wall_material: str | None = None,
+    wall_wpc_color: str | None = None,
     floor_material: str | None = None,
+    floor_wpc_color: str | None = None,
     roller_door: bool = False,
+    roller_door_color: str | None = None,
 ) -> List[dict]:
     """BOM for a rectangular box using AB1000 connectors and 100×100 tubes."""
     a = _ARM_MM
@@ -127,9 +130,14 @@ def bom_for_box(
 
     # ── Floor panel ───────────────────────────────────────────────────────────
     if with_floor:
-        mat = floor_material or "TBD"
+        if floor_material == "wpcFloor" and floor_wpc_color:
+            floor_label = f"WPC {floor_wpc_color}"
+        elif floor_material:
+            floor_label = floor_material
+        else:
+            floor_label = "TBD"
         parts.append(_part("floor_panel", qty=1,
-                           note=f"{round(L-2*o)}×{round(W-2*o)} mm, {mat}"))
+                           note=f"{round(L-2*o)}×{round(W-2*o)} mm, {floor_label}"))
 
     # ── Walls + Schienen ──────────────────────────────────────────────────────
     if walls != "none":
@@ -137,7 +145,12 @@ def bom_for_box(
         span_l    = round(L - 2 * o)
         span_w    = round(W - 2 * o)
         pw        = 100  # middle-post tube width
-        mat_label = wall_material or "TBD"
+        if wall_material == "wpc" and wall_wpc_color:
+            mat_label = f"WPC {wall_wpc_color}"
+        elif wall_material == "realWood":
+            mat_label = "Holz"
+        else:
+            mat_label = wall_material or "TBD"
         # Panel thickness by material
         if wall_material == "realWood":
             wt_mm = 28
@@ -197,8 +210,10 @@ def bom_for_box(
 
     # ── Roller door ───────────────────────────────────────────────────────────
     if roller_door:
-        parts.append(_part("roller_door", qty=1,
-                           note=f"Breite {round(L - 2*o)} mm"))
+        door_note = f"Breite {round(L - 2*o)} mm"
+        if roller_door_color:
+            door_note += f", {roller_door_color.upper()}"
+        parts.append(_part("roller_door", qty=1, note=door_note))
 
     # ── Bike stands (always present) ──────────────────────────────────────────
     # One 40×40 mm connecting bar spanning the full inner length at arm-tip height.

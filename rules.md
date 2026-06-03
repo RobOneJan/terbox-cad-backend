@@ -36,43 +36,63 @@ Values exceeding these are silently clamped (no error):
 
 ## T-Ecke (T-shaped connector)
 - Fixed geometry. Two X arms + one Z arm (T-shape in the XZ plane).
-- Used at the **top of each middle post** (front and back).
-- The STEP template has the Z arm pointing **upward (+Z)**. At the post top, the Z arm must point **downward** (into the post) — apply a Z-flip: `z → −z`, and reverse face winding (`(a,b,c) → (a,c,b)`).
-- After Z-flip, placed at `(post_x, y_pos, H−a)` so the Z arm descends into the post and both X arms align with the adjacent split top tubes.
-- Total T-Ecke count = `2 × n_mid_posts` (one per post × front + back).
+- Used at **both the top and the bottom of each middle post** (front and back).
+
+### T-Ecke top
+- The STEP template has the Z arm pointing **upward (+Z)**. At the post top it must point **downward** — apply a Z-flip: `z → −z`, reverse face winding (`(a,b,c) → (a,c,b)`).
+- Placed at `(post_x, y_pos, H−a)` — Z arm descends into the post, X arms align with the split top tubes.
+
+### T-Ecke bottom
+- The STEP template Z arm already points **upward (+Z)** — **no flip needed** at the bottom.
+- Placed at `(post_x, y_pos, a)` — Z arm ascends into the post, X arms align with the split bottom tubes.
+- **Back posts**: always. **Front posts**: only when `with_floor = true` (no bottom front tube without floor).
+
+Total T-Ecke count = `4 × n_mid_posts` minus the front-bottom connectors omitted when `with_floor = false`.
 
 ---
 
 ## Tubes (100×100 mm)
 - Cross-section 100×100 mm. Length varies per position.
-- Tube length = junction-center-to-junction-center distance minus 2× arm length (2 × 120 = 240 mm total).
-- Tube cross-section center sits exactly at the arm opening center: `o = 45 mm` from junction in each perpendicular axis.
+- **Tube length = junction-centre to junction-centre distance.** Each end physically overlaps into its connector arm by `a = 120 mm`.
+- Tube cross-section centre sits `o = 45 mm` from the junction centre in each perpendicular axis (arm mouth offset).
 - Standard box: 12 tubes — 4 along X (length), 4 along Y (depth), 4 along Z (height).
-- When `with_floor = false`: the front bottom X tube (at z = o, y = o) is omitted.
-- When middle posts are present: the two top X tubes (front and back, at z = H−o) are each replaced by `n_mid_posts + 1` split segments.
+- When `with_floor = false`: the front bottom X tube is omitted.
+- When `n_mid_posts > 0`: **all four X tubes** (front/back top and front/back bottom) are replaced by split segments. Front bottom remains omitted when `with_floor = false`.
 
 ### Split tubes (middle posts present)
 - Segment spacing: `seg = (L − 2 × o) / (n_mid_posts + 1)`
-- Post positions along X: `post_xs[i] = o + seg × (i + 1)` for i = 0…n−1
+- Post positions along X: `post_xs[i] = o + seg × (i + 1)` for i = 0 … n−1
 - Junction list: `[a] + post_xs + [L−a]`
-- Each segment tube length: `x_right_junction − x_left_junction − 2 × a`
-  - End segments (corner ↔ first/last T-Ecke): `seg − 2a − o`
-  - Inner segments (T-Ecke ↔ T-Ecke): `seg − 2a`
+- **Each segment tube length = `x_right_junction − x_left_junction`** (junction-to-junction, same rule as full tubes — the tube overlaps into both connectors).
 - Segment centre X: `(x_left_junction + x_right_junction) / 2`
-- Total split tubes: `2 × (n_mid_posts + 1)` (front and back top runs).
+- Top splits placed at `z = H − o`; bottom splits placed at `z = o`.
+- Bottom back splits: always. Bottom front splits: only when `with_floor = true`.
+- Total split tubes (top): `2 × (n_mid_posts + 1)`. Bottom: same, minus front when no floor.
 
 ---
 
 ## Middle Posts (Mittelposten)
-- Count: `n_mid_posts = max(0, ceil((L − 2 × o) / 2500) − 1)`
-  - 0 posts when inner span ≤ 2500 mm
-  - 1 post when inner span 2501–5000 mm
-  - 2 posts when inner span 5001–7500 mm, etc.
+- Count: `n_mid_posts = max(0, ceil(max(0, inner_span − first_threshold) / 2500))` where `first_threshold = 2500 if width_mm > 1500 else 3500`.
+  - 0 posts when inner span ≤ first_threshold
+  - 1 post when inner span is first_threshold + 1 … first_threshold + 2500
+  - 2 posts for each additional 2500 mm, etc.
 - Evenly spaced: `post_xs[i] = o + seg × (i + 1)` where `seg = (L − 2 × o) / (n_mid_posts + 1)`
 - **Two posts per X position**: one front (y = o), one back (y = W − o).
-- Each post: standard 100×100 tube, length = `H − 2 × a`, centred at `(post_x, y_pos, H/2)`.
-- T-Ecke connector at the top of each post at `(post_x, y_pos, H−a)` (Z-flipped).
-- **Front posts only**: when `with_floor = false`, a Fussplatte is placed under each front middle post. Back posts always have the bottom horizontal tube as support.
+
+### Post height
+| Condition | Length | Centre Z |
+|-----------|--------|----------|
+| Back post (always) | `H − 2 × a` | `H / 2` |
+| Front post, `with_floor = true` | `H − 2 × a` | `H / 2` |
+| Front post, `with_floor = false` | `H − 2 × a + 100` | `(H − 100) / 2` |
+
+The 100 mm extension lets the front post reach down into the Fussplatte when there is no bottom front tube.
+
+### Connectors per post
+| Position | Connector | Placement | Notes |
+|----------|-----------|-----------|-------|
+| Top | T-Ecke **Z-flipped** | `(post_x, y_pos, H−a)` | always |
+| Bottom | T-Ecke **unflipped** | `(post_x, y_pos, a)` | back: always; front: only with floor |
 
 ---
 
@@ -83,7 +103,7 @@ Values exceeding these are silently clamped (no error):
 - Placement: translate so the bbox top (77.5 mm above center) sits at z = 0.
   - Effective center z = plate_top = 77.5 mm → `_place(bv, post_x, o, plate_top)` for each front post.
   - This puts the plate base at z = −77.5 mm and the pin tip at z = +77.5 mm (extending up into the tube bottom).
-- One Fussplatte per front middle post when no floor.
+- One Fussplatte per front middle post when `with_floor = false` (`n_mid_posts` total).
 
 ---
 

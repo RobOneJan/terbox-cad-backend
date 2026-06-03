@@ -707,43 +707,79 @@ def generate_ab1000_preview_glb(
         tube_v, tube_f = _make_tube_box(axis, length)
         for i, pos in enumerate(tube_positions):
             if axis == "x" and i == 0 and not with_floor:
-                continue  # front bottom tube omitted when no floor
-            if axis == "x" and i in (2, 3) and n_mid_posts > 0:
-                continue  # top front/back tubes replaced by split segments below
+                continue  # front bottom absent when no floor
+            if axis == "x" and n_mid_posts > 0:
+                continue  # all X tubes replaced by split segments when mid-posts present
             instances.append((f"Rohr_{axis.upper()}__{i+1}", _place(tube_v, *pos), tube_f, _STEEL_RGB))
 
     # --- Middle posts (front + back) one per 2500mm of inner span ---
     if n_mid_posts > 0:
+        # Standard post: junction-to-junction height
         mp_v, mp_f = _make_tube_box("z", H - 2 * a)
+        # Extended front post (no floor): reaches ~100 mm past bottom junction toward Fussplatte
+        _POST_EXT   = 100.0
+        mp_vf, mp_ff = _make_tube_box("z", H - 2 * a + _POST_EXT)
 
-        # T-Ecke flipped: template Z arm points +Z (up); at post top it must point -Z (down)
-        tv_flip, tf_flip = None, None
+        # T-Ecke top: Z arm must point DOWN into post → Z-flip template
+        # T-Ecke bottom: Z arm points UP into post → use template as-is (no flip)
+        tv_top, tf_top = None, None
+        tv_bot, tf_bot = None, None
         if _ab_t_ecke_geom:
             tv_raw, tf_raw = _ab_t_ecke_geom
-            tv_flip = [(x, y, -z) for x, y, z in tv_raw]
-            tf_flip = [(fa, fc, fb) for fa, fb, fc in tf_raw]
+            tv_top = [(x, y, -z) for x, y, z in tv_raw]   # flipped for top
+            tf_top = [(fa, fc, fb) for fa, fb, fc in tf_raw]
+            tv_bot, tf_bot = tv_raw, tf_raw                 # unflipped for bottom
 
-        # Junction X positions for the top tube segments: [a, post_xs..., L-a]
+        # Junction X positions shared by top and bottom splits: [a, post_xs…, L-a]
         junctions_x = [a] + list(post_xs) + [L - a]
 
         for y_pos, label in [(o, "Vorne"), (W - o, "Hinten")]:
-            # Split top tubes: one segment per gap between junctions
+            is_front = (y_pos == o)
+
+            # ── Split top tubes (always) ──────────────────────────────────────
             for si in range(len(junctions_x) - 1):
                 x_l, x_r = junctions_x[si], junctions_x[si + 1]
-                seg_len = x_r - x_l - 2 * a   # tube mouth-to-mouth length
+                seg_len = x_r - x_l
                 seg_cx  = (x_l + x_r) / 2
                 seg_tv, seg_tf = _make_tube_box("x", seg_len)
                 instances.append((f"Rohr_X_Top_{label}_{si}",
                                    _place(seg_tv, seg_cx, y_pos, H - o), seg_tf, _STEEL_RGB))
-            # Posts and T-Eckes at each post position
-            for pi, px in enumerate(post_xs):
-                instances.append((f"Mittelpost_{label}_{pi}",
-                                   _place(mp_v, px, y_pos, H / 2), mp_f, _STEEL_RGB))
-                if tv_flip is not None:
-                    instances.append((f"T_Ecke_{label}_{pi}_Oben",
-                                       _place(tv_flip, px, y_pos, H - a), tf_flip, _STEEL_RGB))
 
-        # Fußstück under each front post when no floor (front bottom tube absent)
+            # ── Split bottom tubes ────────────────────────────────────────────
+            # Back: always.  Front: only when floor is present.
+            if not is_front or with_floor:
+                for si in range(len(junctions_x) - 1):
+                    x_l, x_r = junctions_x[si], junctions_x[si + 1]
+                    seg_len = x_r - x_l
+                    seg_cx  = (x_l + x_r) / 2
+                    seg_tv, seg_tf = _make_tube_box("x", seg_len)
+                    instances.append((f"Rohr_X_Bot_{label}_{si}",
+                                       _place(seg_tv, seg_cx, y_pos, o), seg_tf, _STEEL_RGB))
+
+            # ── Posts + T-Eckes at each post position ─────────────────────────
+            for pi, px in enumerate(post_xs):
+                # Front post without floor: extend 100 mm past bottom junction
+                if is_front and not with_floor:
+                    pv, pf  = mp_vf, mp_ff
+                    post_cz = (H - 100.0) / 2   # centre shifts down with the extension
+                else:
+                    pv, pf  = mp_v, mp_f
+                    post_cz = H / 2
+                instances.append((f"Mittelpost_{label}_{pi}",
+                                   _place(pv, px, y_pos, post_cz), pf, _STEEL_RGB))
+
+                # Top T-Ecke (Z-flipped, Z arm down)
+                if tv_top is not None:
+                    instances.append((f"T_Ecke_{label}_{pi}_Oben",
+                                       _place(tv_top, px, y_pos, H - a), tf_top, _STEEL_RGB))
+
+                # Bottom T-Ecke (unflipped, Z arm up) — mirrors top logic
+                # Back: always.  Front: only when floor present (tube present to connect to).
+                if tv_bot is not None and (not is_front or with_floor):
+                    instances.append((f"T_Ecke_{label}_{pi}_Unten",
+                                       _place(tv_bot, px, y_pos, a), tf_bot, _STEEL_RGB))
+
+        # Fußstück under each front post when no floor
         if not with_floor:
             bv, bf = None, None
             for key, (verts, faces, tx, ty, tz) in _ab_instances.items():
@@ -792,7 +828,8 @@ def generate_ab1000_preview_glb(
                 instances.append((f"Bolt_Dach_{bi}_{xi}",
                                    _place(bv, bx, by, bolt_cz), bf, _STEEL_RGB))
 
-    # --- Floor: sits inside bottom frame at tube-center height ---
+
+# --- Floor: sits inside bottom frame at tube-center height ---
     if with_floor:
         f_rgb = _floor_rgb(floor_material, floor_wpc_color)
         floor_t = 30.0
