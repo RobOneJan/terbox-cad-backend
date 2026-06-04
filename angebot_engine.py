@@ -1,5 +1,6 @@
 from io import BytesIO
 from datetime import date
+from pathlib import Path
 from typing import List
 
 from reportlab.lib.pagesizes import A4
@@ -14,6 +15,8 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 from models import AngebotRequest
+
+_LOGO_PATH = Path(__file__).parent / "ter-logo-icon.png"
 
 # ── Company constants ─────────────────────────────────────────────────────────
 
@@ -79,6 +82,17 @@ def _styles():
 def _draw_header(canvas, doc, req: AngebotRequest):
     canvas.saveState()
     s = _styles()
+
+    # Logo – top-right corner
+    if _LOGO_PATH.exists():
+        logo_size = 20 * mm
+        canvas.drawImage(
+            str(_LOGO_PATH),
+            x=PAGE_W - MR - logo_size,
+            y=PAGE_H - 5 * mm - logo_size,
+            width=logo_size, height=logo_size,
+            preserveAspectRatio=True, mask="auto",
+        )
 
     # Sender line above recipient address
     sender_y = PAGE_H - 22 * mm

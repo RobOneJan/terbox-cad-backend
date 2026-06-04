@@ -140,14 +140,18 @@ async def ab1000_bom_xlsx(config: BoxConfig = Body(openapi_examples=_BOX_EXAMPLE
 
 @app.post("/ab1000/angebot-konfiguration", dependencies=[Depends(verify_api_key)])
 async def ab1000_angebot_konfiguration(req: BoxAngebotRequest):
-    """Generate a quote PDF from a BoxConfig + price table."""
+    """Generate a quote PDF. Prices are auto-calculated from pricing.json; req.preise only used for extras and lieferkosten override."""
     try:
         from models import AngebotRequest
-        positionen = quote_logic.box_config_to_positionen(req.config, req.preise)
+        preise = quote_logic.compute_preise(req.config)
+        preise.extras = req.preise.extras
+        if req.preise.lieferkosten is not None:
+            preise.lieferkosten = req.preise.lieferkosten
+        positionen = quote_logic.box_config_to_positionen(req.config, preise)
         if not positionen:
             raise HTTPException(
                 status_code=422,
-                detail="No positions generated — check that at least one price is set in 'preise'.",
+                detail="No positions generated.",
             )
         angebot_req = AngebotRequest(
             angebots_nr=req.angebots_nr,

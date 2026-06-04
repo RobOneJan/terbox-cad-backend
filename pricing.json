@@ -1,0 +1,32 @@
+{
+  "korpus": {
+    "basis": 1500.0,
+    "pro_m2_grundflaeche": 250.0,
+    "pro_mittelpfosten_paar": 190.0,
+    "dach_pro_m2": 100.0
+  },
+  "boden": {
+    "massiv_pro_m2": 50.0,
+    "wpc_pro_m2": 88.0,
+    "holz_pro_m2": 78.0
+  },
+  "wand": {
+    "wpc_pro_m2": 115.0,
+    "holz_pro_m2": 105.0,
+    "glas_pro_m2": 195.0,
+    "gitter_pro_m2": 68.0,
+    "gitter_sicht_pro_m2": 88.0,
+    "trapezblech_pro_m2": 52.0
+  },
+  "rolltor": {
+    "basis": 820.0,
+    "pro_m_breite": 185.0
+  },
+  "solar": {
+    "pro_panel": 370.0
+  },
+  "fahrradstaender": {
+    "pro_einheit": 120.0
+  },
+  "lieferkosten": 150.0
+}

@@ -1,6 +1,10 @@
+import json
 import math
+from pathlib import Path
 from typing import List
 from models import BoxConfig, BoxAngebotPreise, AngebotPosition, WallHeight
+
+_PRICING_PATH = Path(__file__).parent / "pricing.json"
 
 # ── Display-name maps ─────────────────────────────────────────────────────────
 
@@ -190,3 +194,90 @@ def box_config_to_positionen(
         ))
 
     return positions
+
+
+_WALL_PRICE_KEY = {
+    "wpc":                  "wpc_pro_m2",
+    "realWood":             "holz_pro_m2",
+    "glass":                "glas_pro_m2",
+    "meshFence":            "gitter_pro_m2",
+    "meshFenceWithPrivacy": "gitter_sicht_pro_m2",
+    "corrugatedSheet":      "trapezblech_pro_m2",
+}
+
+_FLOOR_PRICE_KEY = {
+    None:        "massiv_pro_m2",
+    "wpcFloor":  "wpc_pro_m2",
+    "woodFloor": "holz_pro_m2",
+}
+
+
+def compute_preise(config: BoxConfig) -> BoxAngebotPreise:
+    """Compute BoxAngebotPreise from pricing.json rates and box dimensions."""
+    pricing = json.loads(_PRICING_PATH.read_text(encoding="utf-8"))
+    L, W, H = config.width_mm, config.depth_mm, config.height_mm
+
+    # Middle post count (mirrors assembly_rules formula)
+    inner_span_l = L - 2 * _o
+    first_threshold = 2500.0 if W > 1500.0 else 3500.0
+    n_mid_posts = max(0, math.ceil(max(0.0, inner_span_l - first_threshold) / 2500.0))
+
+    # Grundkorpus
+    kp = pricing["korpus"]
+    footprint_m2 = (L / 1000) * (W / 1000)
+    grundkorpus = (
+        kp["basis"]
+        + kp["pro_m2_grundflaeche"] * footprint_m2
+        + kp["pro_mittelpfosten_paar"] * n_mid_posts
+        + (kp["dach_pro_m2"] * footprint_m2 if config.with_roof else 0)
+    )
+
+    # Boden
+    boden = None
+    if config.with_floor:
+        floor_area_m2 = ((L - 2 * _o) / 1000) * ((W - 2 * _o) / 1000)
+        mat_key = _FLOOR_PRICE_KEY.get(
+            config.floor_material.value if config.floor_material else None,
+            "massiv_pro_m2",
+        )
+        boden = pricing["boden"][mat_key] * floor_area_m2
+
+    # Wände
+    wand = None
+    if config.walls != WallHeight.none and config.wall_material:
+        wall_h_mm = (H - 2 * _o) / 2 if config.walls == WallHeight.half else H - 2 * _o
+        area_m2 = ((L - 2 * _o) + 2 * (W - 2 * _o)) * wall_h_mm / 1e6
+        mat_key = _WALL_PRICE_KEY.get(config.wall_material.value, "wpc_pro_m2")
+        wand = pricing["wand"][mat_key] * area_m2
+
+    # Rolltor
+    rolltor = None
+    if config.roller_door:
+        door_width_m = (L - 2 * _o) / 1000
+        rolltor = pricing["rolltor"]["basis"] + pricing["rolltor"]["pro_m_breite"] * door_width_m
+
+    # Solar (per-panel price; qty is applied by box_config_to_positionen)
+    solar = None
+    solar_pro_panel = False
+    if config.with_solar and config.with_roof:
+        _SW, _SD, _GAP = 760.0, 1530.0, 20.0
+        inner_x, inner_y = L - 2 * _o, W - 2 * _o
+        panel_w = _SW if inner_y >= _SD + 100.0 else (_SD if inner_y >= _SW + 100.0 else 0.0)
+        n_solar = max(1, int(inner_x / (panel_w + _GAP))) if panel_w > 0 else 0
+        if n_solar > 0:
+            solar = pricing["solar"]["pro_panel"]
+            solar_pro_panel = True
+
+    # Fahrradständer (per-unit price; qty is applied by box_config_to_positionen)
+    fahrradstaender = pricing["fahrradstaender"]["pro_einheit"] if config.with_bike_stand else None
+
+    return BoxAngebotPreise(
+        grundkorpus=round(grundkorpus, 2),
+        wand=round(wand, 2) if wand is not None else None,
+        boden=round(boden, 2) if boden is not None else None,
+        rolltor=round(rolltor, 2) if rolltor is not None else None,
+        fahrradstaender=fahrradstaender,
+        solar=solar,
+        solar_pro_panel=solar_pro_panel,
+        lieferkosten=pricing["lieferkosten"],
+    )
