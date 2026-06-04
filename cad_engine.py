@@ -11,6 +11,7 @@ from models import (
 
 _TEMPLATE_PATH    = Path(__file__).parent / "TER BOX 100x100.step"
 _AB_TEMPLATE_PATH = Path(__file__).parent / "TER BOX AB1000.step"
+_SOLAR_PATH       = Path(__file__).parent / "PV ST SOLAR.step"
 _REGISTRY_PATH    = Path(__file__).parent / "component_registry.json"
 
 _STANDARD_WIDTH_CM  = 249.4
@@ -48,8 +49,8 @@ _AB_ROOF = frozenset(["Rohr Dach Links", "Dach Links"])
 _AB_BASE = frozenset(["Fussplatte"])
 
 # Template bounding box (mm) — derived from STEP
-_AB_L = 3595.7
-_AB_W = 2143.0
+_AB_DEPTHIDTH = 3595.7
+_AB_DEPTH = 2143.0
 _AB_H = 2208.5
 
 # --- Color maps ---
@@ -75,6 +76,17 @@ _WPC_RGB = {
 }
 _DEFAULT_GREY = (0.5, 0.5, 0.5)
 _STEEL_RGB    = (0.68, 0.68, 0.70)
+
+_FRAME_COLOR_RGB = {
+    "tiefschwarz":      (0.055, 0.055, 0.063),  # RAL 9005
+    "verkehrsweiss":    (0.969, 0.969, 0.949),  # RAL 9016
+    "anthrazitgrau":    (0.220, 0.243, 0.259),  # RAL 7016
+    "lichtgrau":        (0.839, 0.839, 0.816),  # RAL 7035
+    "feuerrot":         (0.686, 0.169, 0.118),  # RAL 3000
+    "enzianblau":       (0.055, 0.302, 0.643),  # RAL 5010
+    "moosgruen":        (0.059, 0.263, 0.212),  # RAL 6005
+    "schokoladenbraun": (0.267, 0.184, 0.161),  # RAL 8017
+}
 
 _WALL_MAT_RGB = {
     "realWood":             (0.60, 0.45, 0.30),
@@ -296,6 +308,9 @@ _components = None
 # Key = "BaseName__N", value = (centered_verts, faces, tx, ty, tz)
 _ab_instances: Optional[Dict[str, Tuple[list, list, float, float, float]]] = None
 
+# Solar panel (PV ST SOLAR.step): single monolithic solid, laid flat
+_solar_panel_geom: Optional[Tuple[list, list]] = None
+
 
 # --- Loaders ---
 
@@ -419,6 +434,66 @@ def _load_ab():
     }
 
 
+def _load_solar():
+    global _solar_panel_geom
+    if _solar_panel_geom is not None:
+        return
+
+    from OCP.STEPCAFControl import STEPCAFControl_Reader
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.XCAFApp import XCAFApp_Application
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+    from OCP.TDF import TDF_LabelSequence
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.BRep import BRep_Tool
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED
+    from OCP.TopoDS import TopoDS
+
+    app = XCAFApp_Application.GetApplication_s()
+    doc = TDocStd_Document(TCollection_ExtendedString("TER-SOLAR"))
+    app.NewDocument(TCollection_ExtendedString("TER-SOLAR"), doc)
+    reader = STEPCAFControl_Reader()
+    reader.ReadFile(str(_SOLAR_PATH))
+    reader.Transfer(doc)
+    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+    labels = TDF_LabelSequence()
+    shape_tool.GetFreeShapes(labels)
+    shape = shape_tool.GetShape_s(labels.Value(1))
+
+    BRepMesh_IncrementalMesh(shape, 2.0).Perform()
+    verts, faces, offset = [], [], 0
+    exp = TopExp_Explorer(shape, TopAbs_FACE)
+    while exp.More():
+        face = TopoDS.Face_s(exp.Current())
+        loc = TopLoc_Location()
+        tri = BRep_Tool.Triangulation_s(face, loc)
+        if tri is not None:
+            for i in range(1, tri.NbNodes() + 1):
+                n = tri.Node(i)
+                if not loc.IsIdentity():
+                    n = n.Transformed(loc.Transformation())
+                verts.append((n.X(), n.Y(), n.Z()))
+            rev = face.Orientation() == TopAbs_REVERSED
+            for i in range(1, tri.NbTriangles() + 1):
+                a, b, c = tri.Triangle(i).Get()
+                a -= 1; b -= 1; c -= 1
+                if rev: a, b = b, a
+                faces.append((offset + a, offset + b, offset + c))
+            offset += tri.NbNodes()
+        exp.Next()
+
+    # Lay flat on roof: STEP X=760mm width, Y=35mm thickness, Z=1530mm length
+    # Rotate (x,y,z)→(x,z,y): length moves to box-Y, thickness moves to box-Z
+    # This is a Y↔Z reflection → reverse face winding to preserve outward normals
+    verts = [(x, z, y) for x, y, z in verts]
+    faces = [(a, c, b) for a, b, c in faces]
+
+    _solar_panel_geom = (_center_bbox(verts), faces)
+
+
 # --- AB1000 geometry library ---
 
 # Per-connector-instance: centered at STEP connection point, with translation stored
@@ -452,8 +527,8 @@ def _build_ab_geom_library():
             # junction by up to 120mm depending on the connector's rotation.
             centered = _center_bbox(verts)
             # Corner assignment still uses the STEP translation (which normalises correctly)
-            nx = round(tx / _AB_L)
-            ny = round(ty / _AB_W)
+            nx = round(tx / _AB_DEPTHIDTH)
+            ny = round(ty / _AB_DEPTH)
             nz = round(tz / _AB_H)
             norm_corner = (nx, ny, nz)
             if norm_corner not in _ab_corner_map:
@@ -622,8 +697,8 @@ def generate_preview_glb(config: TerBoxConfiguration, computed: ComputedConfig) 
 
 
 def generate_ab1000_preview_glb(
-    length_mm: float,
     width_mm:  float,
+    depth_mm:  float,
     height_mm: float,
     with_roof: bool = True,
     with_floor: bool = True,
@@ -634,6 +709,9 @@ def generate_ab1000_preview_glb(
     floor_wpc_color: str | None = None,  # "cedar" | "darkGrey" | "teak" | "ipe" | "lightGrey"
     roller_door: bool = False,
     roller_door_color: str | None = None,  # RAL code e.g. "ral9005"
+    with_solar: bool = False,
+    with_bike_stand: bool = True,
+    frame_color: str | None = None,        # see _FRAME_COLOR_RGB keys
 ) -> bytes:
     if not _AB_TEMPLATE_PATH.exists():
         raise FileNotFoundError(f"STEP template not found at {_AB_TEMPLATE_PATH}")
@@ -642,11 +720,12 @@ def generate_ab1000_preview_glb(
 
     reg = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
     arm = float(reg["y_corner"]["arm_length_mm"])
+    _fr = _FRAME_COLOR_RGB.get(frame_color, _STEEL_RGB) if frame_color else _STEEL_RGB
 
-    L, W, H = length_mm, width_mm, height_mm
+    L, W, H = width_mm, depth_mm, height_mm
     # Scale factors relative to template
-    sx = L / _AB_L
-    sy = W / _AB_W
+    sx = L / _AB_DEPTHIDTH
+    sy = W / _AB_DEPTH
     sz = H / _AB_H
 
     instances: List[Tuple[str, list, list, tuple]] = []
@@ -677,24 +756,24 @@ def generate_ab1000_preview_glb(
                 # To align with tubes at (o, *, o) and (o, o, *) the junction must be
                 # placed at (o, a, a) / (L-o, a, a) — NOT at (a, a, a) / (L-a, a, a).
                 lx = o if norm[0] == 0 else L - o
-                instances.append((f"L_Ecke__{i+1}", _place(lv, lx, py, pz), lf, _STEEL_RGB))
+                instances.append((f"L_Ecke__{i+1}", _place(lv, lx, py, pz), lf, _fr))
             continue
         geom = _ab_corner_map.get(norm)
         if not geom:
             continue
         cv, cf = geom
-        instances.append((f"Y_Ecke__{i+1}", _place(cv, px, py, pz), cf, _STEEL_RGB))
+        instances.append((f"Y_Ecke__{i+1}", _place(cv, px, py, pz), cf, _fr))
 
     # --- Tubes: 100×100mm box, junction-to-junction length ---
     # Arm opening center is 75mm offset from junction center in each perp axis (measured from STEP).
     # Tube cross-section center must match arm opening center exactly.
     #
     # Middle posts: threshold depends on box depth.
-    #   width_mm > 1500 → first post when inner span > 2500 mm
-    #   width_mm ≤ 1500 → first post when inner span > 3500 mm
+    #   depth_mm > 1500 → first post when inner span > 2500 mm
+    #   depth_mm ≤ 1500 → first post when inner span > 3500 mm
     # Subsequent posts every 2500 mm in both cases.
     _inner_span     = L - 2 * o
-    _first_threshold = 2500.0 if width_mm > 1500.0 else 3500.0
+    _first_threshold = 2500.0 if depth_mm > 1500.0 else 3500.0
     n_mid_posts = max(0, math.ceil(max(0.0, _inner_span - _first_threshold) / 2500.0))
     _seg = _inner_span / (n_mid_posts + 1) if n_mid_posts > 0 else _inner_span
     post_xs = [o + _seg * (i + 1) for i in range(n_mid_posts)]
@@ -710,7 +789,7 @@ def generate_ab1000_preview_glb(
                 continue  # front bottom absent when no floor
             if axis == "x" and n_mid_posts > 0:
                 continue  # all X tubes replaced by split segments when mid-posts present
-            instances.append((f"Rohr_{axis.upper()}__{i+1}", _place(tube_v, *pos), tube_f, _STEEL_RGB))
+            instances.append((f"Rohr_{axis.upper()}__{i+1}", _place(tube_v, *pos), tube_f, _fr))
 
     # --- Middle posts (front + back) one per 2500mm of inner span ---
     if n_mid_posts > 0:
@@ -743,7 +822,7 @@ def generate_ab1000_preview_glb(
                 seg_cx  = (x_l + x_r) / 2
                 seg_tv, seg_tf = _make_tube_box("x", seg_len)
                 instances.append((f"Rohr_X_Top_{label}_{si}",
-                                   _place(seg_tv, seg_cx, y_pos, H - o), seg_tf, _STEEL_RGB))
+                                   _place(seg_tv, seg_cx, y_pos, H - o), seg_tf, _fr))
 
             # ── Split bottom tubes ────────────────────────────────────────────
             # Back: always.  Front: only when floor is present.
@@ -754,7 +833,7 @@ def generate_ab1000_preview_glb(
                     seg_cx  = (x_l + x_r) / 2
                     seg_tv, seg_tf = _make_tube_box("x", seg_len)
                     instances.append((f"Rohr_X_Bot_{label}_{si}",
-                                       _place(seg_tv, seg_cx, y_pos, o), seg_tf, _STEEL_RGB))
+                                       _place(seg_tv, seg_cx, y_pos, o), seg_tf, _fr))
 
             # ── Posts + T-Eckes at each post position ─────────────────────────
             for pi, px in enumerate(post_xs):
@@ -766,18 +845,18 @@ def generate_ab1000_preview_glb(
                     pv, pf  = mp_v, mp_f
                     post_cz = H / 2
                 instances.append((f"Mittelpost_{label}_{pi}",
-                                   _place(pv, px, y_pos, post_cz), pf, _STEEL_RGB))
+                                   _place(pv, px, y_pos, post_cz), pf, _fr))
 
                 # Top T-Ecke (Z-flipped, Z arm down)
                 if tv_top is not None:
                     instances.append((f"T_Ecke_{label}_{pi}_Oben",
-                                       _place(tv_top, px, y_pos, H - a), tf_top, _STEEL_RGB))
+                                       _place(tv_top, px, y_pos, H - a), tf_top, _fr))
 
                 # Bottom T-Ecke (unflipped, Z arm up) — mirrors top logic
                 # Back: always.  Front: only when floor present (tube present to connect to).
                 if tv_bot is not None and (not is_front or with_floor):
                     instances.append((f"T_Ecke_{label}_{pi}_Unten",
-                                       _place(tv_bot, px, y_pos, a), tf_bot, _STEEL_RGB))
+                                       _place(tv_bot, px, y_pos, a), tf_bot, _fr))
 
         # Fußstück under each front post when no floor
         if not with_floor:
@@ -790,7 +869,7 @@ def generate_ab1000_preview_glb(
                 plate_top = max(v[2] for v in bv)
                 for pi, px in enumerate(post_xs):
                     instances.append((f"Fussplatte_Mittelpost_Vorne_{pi}",
-                                       _place(bv, px, o, plate_top), bf, _STEEL_RGB))
+                                       _place(bv, px, o, plate_top), bf, _fr))
 
     # --- Roof: spans top frame, scales with box L×W ---
     if with_roof:
@@ -812,10 +891,10 @@ def generate_ab1000_preview_glb(
         if sub_v is not None:
             sub_s = _scale_along(_scale_along(sub_v, "x", L - 2*o), "y", W - 2*o)
             instances.append(("Dach_Unterkonstruktion",
-                               _place(sub_s, L/2, W/2, H - o + _SUB_CZ), sub_f, _STEEL_RGB))
+                               _place(sub_s, L/2, W/2, H - o + _SUB_CZ), sub_f, _fr))
         if rv is not None:
             rv_s = _scale_along(_scale_along(rv, "x", L - 2*o), "y", W - 2*o)
-            instances.append(("Dach", _place(rv_s, L/2, W/2, H - o + _PANEL_CZ), rf, _STEEL_RGB))
+            instances.append(("Dach", _place(rv_s, L/2, W/2, H - o + _PANEL_CZ), rf, _fr))
 
         # Bolts connecting panel to substructure beams
         # 5 beams equally spaced in Y (o → W-o), 2 bolt columns in X, bolt spans overlap zone
@@ -826,8 +905,58 @@ def generate_ab1000_preview_glb(
         for bi, by in enumerate(beam_ys):
             for xi, bx in enumerate(bolt_xs):
                 instances.append((f"Bolt_Dach_{bi}_{xi}",
-                                   _place(bv, bx, by, bolt_cz), bf, _STEEL_RGB))
+                                   _place(bv, bx, by, bolt_cz), bf, _fr))
 
+    # --- Solar panels on roof ---
+    # Panel dims after laying flat: 760mm wide (X), 1530mm long (Y), 35.2mm thick (Z)
+    _SOLAR_W = 760.0
+    _SOLAR_D = 1530.0
+    _SOLAR_T = 35.2
+    _SOLAR_RGB = (0.05, 0.08, 0.15)  # dark glass
+
+    if with_solar and with_roof and _SOLAR_PATH.exists():
+        _load_solar()
+        if _solar_panel_geom is not None:
+            sv, sf = _solar_panel_geom
+            inner_x = L - 2 * o
+            inner_y = W - 2 * o
+
+            # Choose orientation: prefer 1530mm along box Y (depth)
+            if inner_y >= _SOLAR_D + 100.0:
+                panel_w, panel_d = _SOLAR_W, _SOLAR_D
+                sv_use, sf_use = sv, sf
+            elif inner_y >= _SOLAR_W + 100.0:
+                # Rotate 90° around Z: (x,y)→(y,−x); det=+1, winding unchanged
+                panel_w, panel_d = _SOLAR_D, _SOLAR_W
+                sv_use = [(y, -x, z) for x, y, z in sv]
+                sf_use = sf
+            else:
+                panel_w = 0
+
+            if panel_w > 0:
+                _GAP = 20.0
+                _RAIL_W = 40.0   # rail width (along panel width axis)
+                _RAIL_H = 25.0   # rail height fills gap between roof surface and panel bottom
+                _RAIL_RGB = (0.78, 0.79, 0.80)  # aluminium
+                n_solar = max(1, int(inner_x / (panel_w + _GAP)))
+                total_span = n_solar * panel_w + (n_solar - 1) * _GAP
+                x0_s = L / 2 - total_span / 2
+                roof_z = H - o + 25.0   # approximate roof top surface
+                panel_cz = roof_z + _SOLAR_T / 2
+                rail_cz  = roof_z - _RAIL_H / 2  # rails sit in the gap below the panel
+                panel_cy = W / 2
+                # Two rails per panel running along panel depth (Y), at 1/4 and 3/4 of panel width (X)
+                rv, rf = _make_box(_RAIL_W, panel_d, _RAIL_H)
+                rail_dx = [-panel_w / 4, panel_w / 4]
+                for si in range(n_solar):
+                    cx = x0_s + si * (panel_w + _GAP) + panel_w / 2
+                    instances.append((f"Solar_{si}",
+                                      _place(sv_use, cx, panel_cy, panel_cz),
+                                      sf_use, _SOLAR_RGB))
+                    for ri, dx in enumerate(rail_dx):
+                        instances.append((f"Solar_{si}_Rail_{ri}",
+                                          _place(rv, cx + dx, panel_cy, rail_cz),
+                                          rf, _RAIL_RGB))
 
 # --- Floor: sits inside bottom frame at tube-center height ---
     if with_floor:
@@ -850,12 +979,14 @@ def generate_ab1000_preview_glb(
         else:
             _wt = 30.0
         _pw  = 100.0  # middle post width (matches tube cross-section)
-        # Panels span tube-center to tube-center; Schienen (mounted at tube centers) frame the edges
+        _tf  = 50.0   # tube half-width (100 mm tube)
+        _ti  = o + _tf  # tube inner face offset from box origin (= 95 mm)
+        # Panel outer face at tube outer face; Schienen on tube inner faces; panels fit between
         panel_h = (H - 2 * o) / 2 if walls == "half" else H - 2 * o
         z_ctr   = o + panel_h / 2
-        back_y  = W - o - _wt / 2   # panel face flush with back tube center
-        left_x  = o + _wt / 2       # panel face flush with left tube center
-        right_x = L - o - _wt / 2   # panel face flush with right tube center
+        back_y  = W - o + _tf - _wt / 2   # centre; outer face at back tube outer face
+        left_x  = o - _tf + _wt / 2       # centre; outer face at left tube outer face
+        right_x = L - o + _tf - _wt / 2   # centre; outer face at right tube outer face
         w_rgb = _wall_rgb(wall_material, wall_wpc_color)
 
         def _panel_items(name, lx, ly, lz, cx, cy, cz, corr_axis="x"):
@@ -867,32 +998,33 @@ def generate_ab1000_preview_glb(
             return [(name, _place(pv, cx, cy, cz), pf, w_rgb)]
 
         def _panels_back():
+            # Panel spans between the left and right tube inner faces (_ti … L−_ti)
             if n_mid_posts > 0:
-                # One panel per gap between structural posts; post occupies _pw in X
                 for si in range(n_mid_posts + 1):
-                    x_start = post_xs[si - 1] + _pw / 2 if si > 0 else o
-                    x_end   = post_xs[si]     - _pw / 2 if si < n_mid_posts else L - o
+                    x_start = post_xs[si - 1] + _pw / 2 if si > 0 else _ti
+                    x_end   = post_xs[si]     - _pw / 2 if si < n_mid_posts else L - _ti
                     pw = x_end - x_start
                     cx = (x_start + x_end) / 2
                     instances.extend(_panel_items(f"Wand_Hinten_{si}", pw, _wt, panel_h, cx, back_y, z_ctr))
             else:
-                instances.extend(_panel_items("Wand_Hinten", L - 2 * o, _wt, panel_h, L / 2, back_y, z_ctr))
+                instances.extend(_panel_items("Wand_Hinten", L - 2 * _ti, _wt, panel_h, L / 2, back_y, z_ctr))
 
         def _panels_side(x_pos, label):
-            span = W - 2 * o
+            # Panel spans between the front and back tube inner faces (_ti … W−_ti)
+            span = W - 2 * _ti
             n_posts_s = max(0, math.ceil(span / 2500.0) - 1)
             if n_posts_s > 0:
                 seg_s = span / (n_posts_s + 1)
-                post_ys = [o + seg_s * (j + 1) for j in range(n_posts_s)]
+                post_ys = [_ti + seg_s * (j + 1) for j in range(n_posts_s)]
                 for si in range(n_posts_s + 1):
-                    y_start = post_ys[si - 1] + _pw / 2 if si > 0 else o
-                    y_end   = post_ys[si]     - _pw / 2 if si < n_posts_s else W - o
+                    y_start = post_ys[si - 1] + _pw / 2 if si > 0 else _ti
+                    y_end   = post_ys[si]     - _pw / 2 if si < n_posts_s else W - _ti
                     ph = y_end - y_start
                     cy = (y_start + y_end) / 2
                     instances.extend(_panel_items(f"Wand_{label}_{si}", _wt, ph, panel_h, x_pos, cy, z_ctr, "y"))
                 for j, py in enumerate(post_ys):
                     mv, mf = _make_tube_box("z", panel_h)
-                    instances.append((f"Wand_{label}_M_{j}", _place(mv, x_pos, py, z_ctr), mf, _STEEL_RGB))
+                    instances.append((f"Wand_{label}_M_{j}", _place(mv, x_pos, py, z_ctr), mf, _fr))
             else:
                 instances.extend(_panel_items(f"Wand_{label}", _wt, span, panel_h, x_pos, W / 2, z_ctr, "y"))
 
@@ -900,41 +1032,38 @@ def generate_ab1000_preview_glb(
         _panels_side(left_x,  "Links")
         _panels_side(right_x, "Rechts")
 
-        # Schienen: U-profile rails centered on tubes, framing each panel on all 4 sides
-        # Dimensions by material: wood=35×35×35×3mm, WPC=25×25×25×2mm, others=18×38mm
+        # Schienen on tube inner faces; panel fits inside
         if wall_material == "realWood":
             _sd, _sw = 35.0, 35.0
         elif wall_material == "wpc":
             _sd, _sw = 25.0, 25.0
         else:
             _sd, _sw = 18.0, 38.0
-        # Back wall: vertical rails on left/right tubes, horizontal rails on bottom/top tubes
-        sv_b,  sf_b  = _make_box(_sd, _sw, panel_h)       # vertical, depth in X
-        sh_b,  sf_hb = _make_box(L - 2*o, _sw, _sd)       # horizontal, depth in Z
-        # Side walls: vertical rails on front/back tubes, horizontal rails on bottom/top tubes
-        sv_s,  sf_s  = _make_box(_sw, _sd, panel_h)       # vertical, depth in Y
-        sh_s,  sf_hs = _make_box(_sw, W - 2*o, _sd)       # horizontal, depth in Z
+        sv_b,  sf_b  = _make_box(_sd, _sw, panel_h)
+        sh_b,  sf_hb = _make_box(L - 2 * _ti, _sw, _sd)   # spans between tube inner faces
+        sv_s,  sf_s  = _make_box(_sw, _sd, panel_h)
+        sh_s,  sf_hs = _make_box(_sw, W - 2 * _ti, _sd)   # spans between tube inner faces
         instances += [
-            # Back wall
-            ("Schiene_Hinten_L",   _place(sv_b,  o,   back_y, z_ctr), sf_b,  _STEEL_RGB),
-            ("Schiene_Hinten_R",   _place(sv_b,  L-o, back_y, z_ctr), sf_b,  _STEEL_RGB),
-            ("Schiene_Hinten_Bot", _place(sh_b,  L/2, back_y, o    ), sf_hb, _STEEL_RGB),
-            ("Schiene_Hinten_Top", _place(sh_b,  L/2, back_y, H-o  ), sf_hb, _STEEL_RGB),
-            # Left wall
-            ("Schiene_Links_V",    _place(sv_s,  left_x, o,   z_ctr), sf_s,  _STEEL_RGB),
-            ("Schiene_Links_H",    _place(sv_s,  left_x, W-o, z_ctr), sf_s,  _STEEL_RGB),
-            ("Schiene_Links_Bot",  _place(sh_s,  left_x, W/2, o    ), sf_hs, _STEEL_RGB),
-            ("Schiene_Links_Top",  _place(sh_s,  left_x, W/2, H-o  ), sf_hs, _STEEL_RGB),
+            # Back wall – vertical Schienen on tube inner faces (x = _ti, L−_ti)
+            ("Schiene_Hinten_L",   _place(sv_b,  _ti,       back_y, z_ctr), sf_b,  _fr),
+            ("Schiene_Hinten_R",   _place(sv_b,  L - _ti,   back_y, z_ctr), sf_b,  _fr),
+            ("Schiene_Hinten_Bot", _place(sh_b,  L / 2,     back_y, o    ), sf_hb, _fr),
+            ("Schiene_Hinten_Top", _place(sh_b,  L / 2,     back_y, H-o  ), sf_hb, _fr),
+            # Left wall – vertical Schienen on tube inner faces (y = _ti, W−_ti)
+            ("Schiene_Links_V",    _place(sv_s,  left_x,  _ti,     z_ctr), sf_s,  _fr),
+            ("Schiene_Links_H",    _place(sv_s,  left_x,  W - _ti, z_ctr), sf_s,  _fr),
+            ("Schiene_Links_Bot",  _place(sh_s,  left_x,  W / 2,   o    ), sf_hs, _fr),
+            ("Schiene_Links_Top",  _place(sh_s,  left_x,  W / 2,   H-o  ), sf_hs, _fr),
             # Right wall
-            ("Schiene_Rechts_V",   _place(sv_s,  right_x, o,   z_ctr), sf_s,  _STEEL_RGB),
-            ("Schiene_Rechts_H",   _place(sv_s,  right_x, W-o, z_ctr), sf_s,  _STEEL_RGB),
-            ("Schiene_Rechts_Bot", _place(sh_s,  right_x, W/2, o    ), sf_hs, _STEEL_RGB),
-            ("Schiene_Rechts_Top", _place(sh_s,  right_x, W/2, H-o  ), sf_hs, _STEEL_RGB),
+            ("Schiene_Rechts_V",   _place(sv_s,  right_x, _ti,     z_ctr), sf_s,  _fr),
+            ("Schiene_Rechts_H",   _place(sv_s,  right_x, W - _ti, z_ctr), sf_s,  _fr),
+            ("Schiene_Rechts_Bot", _place(sh_s,  right_x, W / 2,   o    ), sf_hs, _fr),
+            ("Schiene_Rechts_Top", _place(sh_s,  right_x, W / 2,   H-o  ), sf_hs, _fr),
         ]
 
     # --- Roller door (open / rolled-up, housing on outside of front top tube) ---
     if roller_door:
-        door_rgb = _RAL_RGB.get(roller_door_color, _STEEL_RGB) if roller_door_color else _STEEL_RGB
+        door_rgb = _RAL_RGB.get(roller_door_color, _fr) if roller_door_color else _fr
         door_w = L - 2 * o
         hd, hh = 200.0, 200.0
         housing_rgb = tuple(max(0.0, c - 0.08) for c in door_rgb)
@@ -944,54 +1073,44 @@ def generate_ab1000_preview_glb(
         hz = H - o - hh / 2    # hangs just below top-tube centreline
         instances.append(("Rolltor_Gehaeuse", _place(hv, L/2, hy, hz), hf, housing_rgb))
 
-    # --- Bike stands (always present) ---
-    _load()
-    stand_rgb = (0.62, 0.62, 0.64)
-    inner_span = L - 2 * o
+    # --- Bike stands ---
+    if with_bike_stand:
+        _load()
+        stand_rgb = (0.62, 0.62, 0.64)
+        inner_span = L - 2 * o
 
-    # P-shaped rack units: element contains 3 units side by side at x≈-554, +18, +590.
-    # Extract the centre unit (full P-shape in Y-Z, 40 mm wide in X) and place N copies.
-    # Natural template pitch ≈ 767 mm (2300 mm / 3 units).
-    sv_raw, sf_all = _components.get("Fahrradständer 40*40", (None, None))
-    if sv_raw:
-        sv_all = _center_bbox(sv_raw)
+        sv_raw, sf_all = _components.get("Fahrradständer 40*40", (None, None))
+        if sv_raw:
+            sv_all = _center_bbox(sv_raw)
 
-        # Centre unit occupies x ∈ (−268, +304) — between the two outer posts
-        unit_idx = [i for i, v in enumerate(sv_all) if -268.0 < v[0] < 304.0]
-        orig_to_local = {orig: loc for loc, orig in enumerate(unit_idx)}
-        unit_verts_raw = [sv_all[i] for i in unit_idx]
+            unit_idx = [i for i, v in enumerate(sv_all) if -268.0 < v[0] < 304.0]
+            orig_to_local = {orig: loc for loc, orig in enumerate(unit_idx)}
+            unit_verts_raw = [sv_all[i] for i in unit_idx]
 
-        # Only faces whose three vertices all belong to the centre unit
-        unit_faces = [
-            (orig_to_local[a], orig_to_local[b], orig_to_local[c])
-            for a, b, c in sf_all
-            if a in orig_to_local and b in orig_to_local and c in orig_to_local
-        ]
+            unit_faces = [
+                (orig_to_local[a], orig_to_local[b], orig_to_local[c])
+                for a, b, c in sf_all
+                if a in orig_to_local and b in orig_to_local and c in orig_to_local
+            ]
 
-        # Re-centre the unit at x = 0
-        ux = (min(v[0] for v in unit_verts_raw) + max(v[0] for v in unit_verts_raw)) / 2
-        unit_verts = [(x - ux, y, z) for x, y, z in unit_verts_raw]
+            ux = (min(v[0] for v in unit_verts_raw) + max(v[0] for v in unit_verts_raw)) / 2
+            unit_verts = [(x - ux, y, z) for x, y, z in unit_verts_raw]
 
-        sz_u = max(v[2] for v in unit_verts) - min(v[2] for v in unit_verts)
-        cy_s = W - (o + 50) - 240.0
-        cz_s = o + sz_u / 2
+            sz_u = max(v[2] for v in unit_verts) - min(v[2] for v in unit_verts)
+            cy_s = W - (o + 50) - 240.0
+            cz_s = o + sz_u / 2
 
-        # Distribute N racks with equal margins at both ends; natural pitch ≈ 767 mm
-        n_racks = max(2, round(inner_span / 767.0))
-        pitch   = inner_span / (n_racks + 1)
-        for i in range(n_racks):
-            cx = o + pitch * (i + 1)
-            instances.append((f"Fahrradstaender_{i}",
-                               _place(unit_verts, cx, cy_s, cz_s), unit_faces, stand_rgb))
+            n_racks = max(2, round(inner_span / 767.0))
+            pitch   = inner_span / (n_racks + 1)
+            for i in range(n_racks):
+                cx = o + pitch * (i + 1)
+                instances.append((f"Fahrradstaender_{i}",
+                                   _place(unit_verts, cx, cy_s, cz_s), unit_faces, stand_rgb))
 
-        # Connecting bar: 40×40 mm square tube spanning the full inner length,
-        # placed at the arm-tip mounting height (cz_s+360) and depth (cy_s+220).
-        # These offsets come directly from the STEP template geometry:
-        # arm tips sit at z=+360 and y=+220 relative to the P-unit centre.
-        bar_v, bar_f = _make_tube_box("x", inner_span, width=40.0)
-        instances.append(("Fahrradstaender_Halterung",
-                           _place(bar_v, L / 2, cy_s + 220.0, cz_s + 360.0),
-                           bar_f, stand_rgb))
+            bar_v, bar_f = _make_tube_box("x", inner_span, width=40.0)
+            instances.append(("Fahrradstaender_Halterung",
+                               _place(bar_v, L / 2, cy_s + 220.0, cz_s + 360.0),
+                               bar_f, stand_rgb))
 
     # --- Write GLB ---
     # Convert mm → m and remap STEP axes (Z-up) to glTF Y-up: output (x, y, z) = (x/1000, z/1000, y/1000)

@@ -1,285 +1,362 @@
 # TER BOX AB1000 – Assembly Rules
 
-## Key Dimensions
-- `a = 120 mm` — arm length of every connector (Y-Ecke, L-Ecke, T-Ecke)
-- `o = a − 75 = 45 mm` — tube cross-section center offset from junction center in each perpendicular axis
-- `tf = 50 mm` — tube half-width (100 mm tube → 50 mm each side from center)
-- `o + tf = 95 mm` — distance from box outer edge to tube inner face
-- All dimensions in millimeters.
+## Dimensions
 
-## Maximum Box Dimensions
-Values exceeding these are silently clamped (no error):
-| Parameter | Maximum |
-|-----------|---------|
-| `length_mm` | 12 000 mm (12 m) |
-| `width_mm` | 2 500 mm (2.5 m) |
-| `height_mm` | 3 000 mm (3 m) |
+| Parameter | Meaning | Max (clamped silently) |
+|-----------|---------|------------------------|
+| `width_mm` | Box width — main horizontal span; middle posts run along this axis | 12 000 mm |
+| `depth_mm` | Box depth — shorter horizontal span; determines mid-post threshold | 2 500 mm |
+| `height_mm` | Box height | 3 000 mm |
+
+Internal aliases: `L = width_mm`, `W = depth_mm`, `H = height_mm`.
+
+---
+
+## Key Offsets
+
+| Symbol | Value | Meaning |
+|--------|-------|---------|
+| `a` | 120 mm | Arm length of every connector (Y-Ecke, L-Ecke, T-Ecke) |
+| `o = a − 75` | 45 mm | Tube cross-section centre from junction centre (each perpendicular axis) |
+| `tf` | 50 mm | Tube half-width (100 mm tube) |
+| `ti = o + tf` | 95 mm | Tube **inner** face from box origin |
 
 ---
 
 ## Y-Ecke (3-arm corner connector)
+
 - Fixed geometry: 240×240×240 mm. Never scaled.
-- Junction center = bbox center of the connector.
+- Junction centre = bbox centre of the connector.
 - 3 arms, each 120 mm long. Each arm points inward along one box axis (X, Y, or Z).
-- Arm opening center is 75 mm from the junction center in each perpendicular direction.
+- Arm opening centre is 75 mm from the junction centre in each perpendicular direction.
 - Used at all 8 box corners where three tubes meet.
-- Placed so the junction center sits at (a, a, a) / (L−a, a, a) etc. — 120 mm inward from each corner.
+- Placed so the junction centre sits at (a, a, a) / (L−a, a, a) etc. — 120 mm inward from each corner.
 - Front-bottom corners (0,0,0) and (1,0,0) are replaced by L-Ecke when `with_floor = false`.
 
 ## L-Ecke (2-arm corner connector)
+
 - Fixed geometry. Two arms only: Y arm and Z arm (no X arm).
-- Arm opening centers follow the same 75 mm rule as Y-Ecke.
-- Used at front-bottom-left and front-bottom-right corners **only when `with_floor = false`** (no front bottom tube).
-- Junction must be placed at `(o, a, a)` and `(L−o, a, a)` — **not** at `(a, a, a)`.
-  - Reason: the L-Ecke has no X arm; its junction aligns with the tube cross-section center in X (= o = 45 mm), not the arm tip (= a = 120 mm).
-- No flip or rotation required; arm mouths align correctly with tubes at (o, *, o) and (o, o, *) as loaded from the STEP file.
+- Used at front-bottom-left and front-bottom-right corners **only when `with_floor = false`**.
+- Junction placed at `(o, a, a)` and `(L−o, a, a)` — not at `(a, a, a)`.
 
 ## T-Ecke (T-shaped connector)
-- Fixed geometry. Two X arms + one Z arm (T-shape in the XZ plane).
+
+- Fixed geometry. Two X arms + one Z arm.
 - Used at **both the top and the bottom of each middle post** (front and back).
 
 ### T-Ecke top
-- The STEP template has the Z arm pointing **upward (+Z)**. At the post top it must point **downward** — apply a Z-flip: `z → −z`, reverse face winding (`(a,b,c) → (a,c,b)`).
-- Placed at `(post_x, y_pos, H−a)` — Z arm descends into the post, X arms align with the split top tubes.
+- STEP template has Z arm pointing up → flip: `z → −z`, reverse face winding.
+- Placed at `(post_x, y_pos, H−a)`.
 
 ### T-Ecke bottom
-- The STEP template Z arm already points **upward (+Z)** — **no flip needed** at the bottom.
-- Placed at `(post_x, y_pos, a)` — Z arm ascends into the post, X arms align with the split bottom tubes.
-- **Back posts**: always. **Front posts**: only when `with_floor = true` (no bottom front tube without floor).
-
-Total T-Ecke count = `4 × n_mid_posts` minus the front-bottom connectors omitted when `with_floor = false`.
+- No flip. Placed at `(post_x, y_pos, a)`.
+- Back posts: always. Front posts: only when `with_floor = true`.
 
 ---
 
 ## Tubes (100×100 mm)
-- Cross-section 100×100 mm. Length varies per position.
-- **Tube length = junction-centre to junction-centre distance.** Each end physically overlaps into its connector arm by `a = 120 mm`.
-- Tube cross-section centre sits `o = 45 mm` from the junction centre in each perpendicular axis (arm mouth offset).
-- Standard box: 12 tubes — 4 along X (length), 4 along Y (depth), 4 along Z (height).
-- When `with_floor = false`: the front bottom X tube is omitted.
-- When `n_mid_posts > 0`: **all four X tubes** (front/back top and front/back bottom) are replaced by split segments. Front bottom remains omitted when `with_floor = false`.
+
+- Cross-section 100×100 mm. Tube length = junction-centre to junction-centre.
+- Tube cross-section centre sits `o = 45 mm` from the junction centre in each perpendicular axis.
+- Standard box: 12 tubes — 4 along X (width), 4 along Y (depth), 4 along Z (height).
+- When `with_floor = false`: front bottom X tube is omitted.
+- When `n_mid_posts > 0`: all four X tubes are replaced by split segments.
 
 ### Split tubes (middle posts present)
+
 - Segment spacing: `seg = (L − 2 × o) / (n_mid_posts + 1)`
-- Post positions along X: `post_xs[i] = o + seg × (i + 1)` for i = 0 … n−1
+- Post positions along X: `post_xs[i] = o + seg × (i + 1)`
 - Junction list: `[a] + post_xs + [L−a]`
-- **Each segment tube length = `x_right_junction − x_left_junction`** (junction-to-junction, same rule as full tubes — the tube overlaps into both connectors).
-- Segment centre X: `(x_left_junction + x_right_junction) / 2`
-- Top splits placed at `z = H − o`; bottom splits placed at `z = o`.
-- Bottom back splits: always. Bottom front splits: only when `with_floor = true`.
-- Total split tubes (top): `2 × (n_mid_posts + 1)`. Bottom: same, minus front when no floor.
+- Each segment length = `x_right_junction − x_left_junction`
+- Top splits placed at `z = H − o`; bottom splits at `z = o`.
 
 ---
 
 ## Middle Posts (Mittelposten)
-- Count: `n_mid_posts = max(0, ceil(max(0, inner_span − first_threshold) / 2500))` where `first_threshold = 2500 if width_mm > 1500 else 3500`.
-  - 0 posts when inner span ≤ first_threshold
-  - 1 post when inner span is first_threshold + 1 … first_threshold + 2500
-  - 2 posts for each additional 2500 mm, etc.
+
+Middle posts run along the **width** axis (X direction).
+
+- Count: `n_mid_posts = max(0, ceil(max(0, inner_span − first_threshold) / 2500))`
+  - `inner_span = L − 2 × o`
+  - `first_threshold = 2500 if depth_mm > 1500 else 3500`
 - Evenly spaced: `post_xs[i] = o + seg × (i + 1)` where `seg = (L − 2 × o) / (n_mid_posts + 1)`
-- **Two posts per X position**: one front (y = o), one back (y = W − o).
+- Two posts per X position: front (y = o) and back (y = W − o).
 
 ### Post height
+
 | Condition | Length | Centre Z |
 |-----------|--------|----------|
 | Back post (always) | `H − 2 × a` | `H / 2` |
 | Front post, `with_floor = true` | `H − 2 × a` | `H / 2` |
 | Front post, `with_floor = false` | `H − 2 × a + 100` | `(H − 100) / 2` |
 
-The 100 mm extension lets the front post reach down into the Fussplatte when there is no bottom front tube.
-
 ### Connectors per post
-| Position | Connector | Placement | Notes |
-|----------|-----------|-----------|-------|
-| Top | T-Ecke **Z-flipped** | `(post_x, y_pos, H−a)` | always |
-| Bottom | T-Ecke **unflipped** | `(post_x, y_pos, a)` | back: always; front: only with floor |
+
+| Position | Connector | Placement |
+|----------|-----------|-----------|
+| Top | T-Ecke Z-flipped | `(post_x, y_pos, H−a)` |
+| Bottom | T-Ecke unflipped | `(post_x, y_pos, a)` — back always; front only with floor |
 
 ---
 
 ## Fussplatte (Base Plate)
-- Fixed geometry: 150×150×155 mm (pin + plate). Centered at bbox center.
-- **Not placed at corners.** Used only under front middle posts when `with_floor = false`.
-- **One per front middle post** — total count = `n_mid_posts` when no floor.
-- Placement: translate so the bbox top (77.5 mm above center) sits at z = 0.
-  - Effective center z = plate_top = 77.5 mm → `_place(bv, post_x, o, plate_top)` for each front post.
-  - This puts the plate base at z = −77.5 mm and the pin tip at z = +77.5 mm (extending up into the tube bottom).
-- One Fussplatte per front middle post when `with_floor = false` (`n_mid_posts` total).
+
+- Only under **front middle posts** when `with_floor = false`.
+- Placement: bbox top at z = 0 → `_place(bv, post_x, o, plate_top)`.
 
 ---
 
 ## Roof
-Two components — both always rendered when `with_roof = true`.
 
-### Roof substructure (`Rohr Dach Links` — rendered as `Dach_Unterkonstruktion`)
-- **Always present alongside the roof panel** — never omit it.
-- STEP template piece: 1600 mm wide (X) × 1469 mm deep (Y) × 85 mm tall (Z).
-- Contains **5 cross-beams** running in X, spaced **360 mm apart** in Y:
-  - Beam centres at y ≈ 145, 505, 865, 1225, 1585 mm in the template.
-  - Each beam ~30 mm wide (40×40 mm tube profile).
-- Scaled in X to `L − 2 × o` and in Y to `W − 2 × o`. Beam spacing scales proportionally.
-- Placed centre at `(L/2, W/2, H − o + t_sub/2)` — sits on top of the top frame tubes.
-- Color: steel grey.
+Rendered when `with_roof = true`. Always includes both substructure and panel.
 
-### Roof panel (`Dach Links` — rendered as `Dach`)
-- Flat/slightly-sloped panel sitting over the substructure.
-- STEP template piece: 1600 mm wide (X) × 1654 mm deep (Y) × 64 mm thick (Z).
+### Roof substructure (`Dach_Unterkonstruktion`)
 - Scaled in X to `L − 2 × o` and in Y to `W − 2 × o`.
-- Placed centre at `(L/2, W/2, H − o + t_panel/2)`.
-- Color: steel grey.
+- Centre: `(L/2, W/2, H − o + _SUB_CZ)` where `_SUB_CZ = −5.3 mm`.
+
+### Roof panel (`Dach`)
+- Scaled in X to `L − 2 × o` and in Y to `W − 2 × o`.
+- Centre: `(L/2, W/2, H − o + _PANEL_CZ)` where `_PANEL_CZ = +7.2 mm`.
 
 ---
 
 ## Floor
-- Flat panel (planks or solid) spanning the inner bottom frame.
-- Size: `(L − 2 × o) × (W − 2 × o)`. Thickness: 30 mm.
-- Center: `(L/2, W/2, o)` — flush with the bottom tube center height.
+
+- Flat panel spanning `(L − 2 × o) × (W − 2 × o)`. Thickness: 30 mm.
+- Centre: `(L/2, W/2, o)`.
+- Materials: `wpcFloor` (WPC planks), `woodFloor` (wood planks), or solid slab.
 
 ---
 
 ## Walls
+
 - Three walls: back, left, right. Front is always open.
-- Height options: `full` (floor to ceiling between tubes), `half` (lower half only), `none`.
-- Panel thickness: 30 mm.
+- Height options: `full`, `half`, `none`.
+- Panel thickness by material: wood = 28 mm, WPC = 21 mm, others = 30 mm.
 
-### Panel dimensions (tube center to tube center)
-- Panels span from tube center to tube center. The Schienen (mounted at tube centers) frame all 4 edges.
-- Full wall height: `panel_h = H − 2 × o = H − 90 mm`
-- Half wall height: `panel_h = (H − 2 × o) / 2`
-- Panel Z center: `z_ctr = o + panel_h / 2`
-  - Full walls: `z_ctr = H / 2`
-  - Half walls: `z_ctr = o + (H − 2 × o) / 4`
+### Panel height
 
-### Panel face positions (face sits at tube center)
-- Back wall: `back_y = W − o − wt/2` (panel back face at tube center y = W − o)
-- Left wall: `left_x = o + wt/2` (panel left face at tube center x = o)
-- Right wall: `right_x = L − o − wt/2`
+- Full wall: `panel_h = H − 2 × o`
+- Half wall: `panel_h = (H − 2 × o) / 2`
+- Z centre: `z_ctr = o + panel_h / 2`
 
-### Panel spans (tube center to tube center)
-- Back wall span: `L − 2 × o = L − 90 mm`
-- Side wall span: `W − 2 × o = W − 90 mm`
+### Panel perpendicular position (outer face = tube outer face, enclosed by tube)
+
+Each panel's **outer face** is at the tube outer face. The panel extends inward — fully enclosed by the tube cross-section.
+
+| Wall | Panel centre | Outer face |
+|------|-------------|------------|
+| Back  | `back_y  = (W − o + tf) − wt/2` | `W − o + tf = W + 5 mm` |
+| Left  | `left_x  = (o − tf) + wt/2`     | `o − tf = −5 mm`        |
+| Right | `right_x = (L − o + tf) − wt/2` | `L − o + tf = L + 5 mm` |
+
+### Panel spans (between tube inner faces)
+
+| Wall | Span direction | Length |
+|------|---------------|--------|
+| Back | X | `L − 2 × ti = L − 190 mm` |
+| Left / Right | Y | `W − 2 × ti = W − 190 mm` |
+
+where `ti = o + tf = 95 mm`.
 
 ### Back wall split (middle posts)
-- When `n_mid_posts > 0`, the back wall splits into `n_mid_posts + 1` panels around the structural posts.
-- Panel width: `(span_l − n_mid_posts × 100) / (n_mid_posts + 1)` where `span_l = L − 2 × o`.
-- No separate wall post is added — the structural mid-post tube serves as the divider.
+
+Panel segments start/end at `ti` / `L − ti` and each post edge.
 
 ### Side wall split (side posts)
-- `n_side_posts = max(0, ceil((W − 2 × o) / 2500) − 1)` — same every-2500mm rule as length.
-- When `n_side_posts > 0`, each side wall splits into `n_side_posts + 1` panels, each with a 100×100 post tube as divider.
+
+- `n_side_posts = max(0, ceil((W − 2 × ti) / 2500) − 1)`
+- Segment boundaries: `ti` → post edge → … → `W − ti`.
 
 ---
 
 ## Schienen (C-channel rails)
-- C-channel rails mounted centered on the surrounding tubes, fully framing each panel on all 4 sides.
-- Simplified as solid boxes: 18 mm deep × 38 mm wide (≥ panel thickness).
-- **4 Schienen per wall face**: 2 vertical (left + right edges) + 2 horizontal (bottom + top edges).
-- All Schienen centered on the tube center axis — the panel edges terminate at the tube center, inside the Schiene groove.
+
+Mounted on **tube inner faces** (`ti = 95 mm` from each edge). Panel fits inside the Schiene groove.
+
+### Dimensions by material
+
+| Material | Depth `_sd` | Width `_sw` |
+|----------|------------|------------|
+| Holz | 35 mm | 35 mm |
+| WPC | 25 mm | 25 mm |
+| Others | 18 mm | 38 mm |
 
 ### Back wall Schienen
-| Rail | Dimensions | Center position |
+
+| Rail | Dimensions | Centre position |
 |------|-----------|-----------------|
-| Left vertical | `18 × 38 × panel_h` | `(o, back_y, z_ctr)` |
-| Right vertical | `18 × 38 × panel_h` | `(L−o, back_y, z_ctr)` |
-| Bottom horizontal | `(L−2o) × 38 × 18` | `(L/2, back_y, o)` |
-| Top horizontal | `(L−2o) × 38 × 18` | `(L/2, back_y, H−o)` |
+| Left vertical | `_sd × _sw × panel_h` | `(ti, back_y, z_ctr)` |
+| Right vertical | `_sd × _sw × panel_h` | `(L−ti, back_y, z_ctr)` |
+| Bottom horizontal | `(L−2·ti) × _sw × _sd` | `(L/2, back_y, o)` |
+| Top horizontal | `(L−2·ti) × _sw × _sd` | `(L/2, back_y, H−o)` |
 
 ### Left wall Schienen
-| Rail | Dimensions | Center position |
+
+| Rail | Dimensions | Centre position |
 |------|-----------|-----------------|
-| Front vertical | `38 × 18 × panel_h` | `(left_x, o, z_ctr)` |
-| Back vertical | `38 × 18 × panel_h` | `(left_x, W−o, z_ctr)` |
-| Bottom horizontal | `38 × (W−2o) × 18` | `(left_x, W/2, o)` |
-| Top horizontal | `38 × (W−2o) × 18` | `(left_x, W/2, H−o)` |
+| Front vertical | `_sw × _sd × panel_h` | `(left_x, ti, z_ctr)` |
+| Back vertical | `_sw × _sd × panel_h` | `(left_x, W−ti, z_ctr)` |
+| Bottom horizontal | `_sw × (W−2·ti) × _sd` | `(left_x, W/2, o)` |
+| Top horizontal | `_sw × (W−2·ti) × _sd` | `(left_x, W/2, H−o)` |
 
-### Right wall: same pattern as left wall at `x = right_x`.
-
-- Color: steel grey (same as tubes and connectors).
-- Added for all wall types (`full` and `half`) whenever walls are present.
+### Right wall: same pattern at `x = right_x`.
 
 ---
 
 ## Roller Door
-- Housing block (200 mm deep × 200 mm high) centered above the front opening.
-- Width: `L − 2 × o` (full front opening width).
-- Sits outside the front face of the box: `y = o − tf − housing_depth/2`.
 
-## Bike Stand
-- **Always present** — not a configurable option, rendered for every box.
-- Two components from the TER BOX 100×100 STEP file (`Fahrradständer 40*40` and `Fahrradständer Befestigung`).
+- Optional (`roller_door = true`).
+- Housing block 200 mm deep × 200 mm high, width `L − 2 × o`.
+- Sits outside the front face: `y = o − tf − 100`, `z = H − o − 100`.
+- `roller_door_color`: RAL code for the door; falls back to `frame_color` if not set.
+
+---
+
+## Frame Color (`frame_color`)
+
+All structural steel — connectors, tubes, middle posts, roof substructure, bolts, Schienen, roller-door housing — share one configurable color. Default: steel grey `(0.68, 0.68, 0.70)`.
+
+| API value | Display name | RAL |
+|-----------|--------------|-----|
+| `tiefschwarz` | Tiefschwarz | 9005 |
+| `verkehrsweiss` | Verkehrsweiß | 9016 |
+| `anthrazitgrau` | Anthrazitgrau | 7016 |
+| `lichtgrau` | Lichtgrau | 7035 |
+| `feuerrot` | Feuerrot | 3000 |
+| `enzianblau` | Enzianblau | 5010 |
+| `moosgruen` | Moosgrün | 6005 |
+| `schokoladenbraun` | Schokoladenbraun | 8017 |
+
+---
+
+## Bike Stand (`with_bike_stand`)
+
+- Optional — default `true`.
+- When `false`: neither rack units nor connecting bar are rendered or added to the BOM or Angebot.
+- Components from `TER BOX 100×100.step`: `Fahrradständer 40*40` + `Fahrradständer Befestigung`.
 
 ### Connecting bar (`Fahrradstaender_Halterung`)
-- A **40×40 mm square tube** spanning the full inner length `L − 2 × o`, running in X at the back wall.
-- Generated procedurally with `_make_tube_box("x", inner_span, width=40.0)` — not scaled from STEP.
-- Position:
-  - X centre: `L / 2`
-  - Y centre: `cy_s + 220` — flush with the back face of the P-arm mounting slots
-  - Z centre: `cz_s + 360` — arm-tip height (derived from STEP template offsets)
-- `cy_s = W − (o + 50) − 240`, `cz_s = o + rack_height / 2` (rack height = 759 mm from STEP).
+- 40×40 mm square tube, length = `L − 2 × o`, running in X.
+- Centre: `(L/2, cy_s + 220, cz_s + 360)`.
 
-### P-shaped rack units (`Fahrradstaender_0 … N`)
-- The STEP element `Fahrradständer 40*40` contains **3 rack units side by side** (total X span = 2300 mm, natural pitch = 767 mm).
-- **Extract the centre unit** (vertices with `−268 < x < 304` in the centred element frame; 144 verts, 92 faces). This gives the full P-shape in the Y-Z plane at 40 mm wide in X.
-- **Do not scale** the extracted unit. Each instance is placed at its natural size.
-- Number of units: `n_racks = max(2, round((L − 2 × o) / 767))`
-- Spacing: equal margins at both ends — `pitch = (L − 2 × o) / (n_racks + 1)`
-- X positions: `cx_i = o + pitch × (i + 1)` for i = 0 … n_racks − 1
+### P-shaped rack units
+- `n_racks = max(2, round((L − 2 × o) / 767))`
+- Evenly spaced along X with equal end margins: `pitch = (L − 2 × o) / (n_racks + 1)`
 - Y centre: `cy_s = W − (o + 50) − 240`
-- Z centre: `cz_s = o + 759 / 2 ≈ o + 379.5`
+- Z centre: `cz_s = o + rack_height / 2` (rack height ≈ 759 mm from STEP)
+
+---
+
+## Solar Panels (`with_solar`)
+
+- Requires `with_roof = true`. Default `false`.
+- Source: `PV ST SOLAR.step` — monolithic solid, 760 × 35.2 × 1530 mm (W × T × L in STEP).
+- Laid flat by rotating `(x,y,z)→(x,z,y)`; face winding reversed.
+
+### Orientation (auto-selected by depth)
+
+| Condition | Panel W (along box X) | Panel D (along box Y) |
+|-----------|-----------------------|-----------------------|
+| `depth_mm − 2·o ≥ 1630` | 760 mm | 1530 mm |
+| `depth_mm − 2·o ≥ 860` | 1530 mm (rotated 90°) | 760 mm |
+| Otherwise | no panels | — |
+
+### Count and spacing
+- `n_solar = max(1, floor(inner_x / (panel_w + 20)))` where `inner_x = L − 2 × o`
+- 20 mm gap between panels; centred along X and Y.
+- Panel Z centre: `H − o + 25 + 17.6 mm` (bottom face on roof surface).
+
+### Mounting rails
+- 2 aluminium rails per panel (40 × 25 mm), running along panel depth, at ±panel_w/4 in X.
+
+---
+
+## API Endpoints
+
+Three routes, all require `X-API-Key` header.
+
+| Method | Path | Returns |
+|--------|------|---------|
+| `POST` | `/ab1000/preview` | GLB binary (`model/gltf-binary`) |
+| `POST` | `/ab1000/bom-xlsx` | Excel XLSX (`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`) |
+| `POST` | `/ab1000/angebot-konfiguration` | PDF (`application/pdf`) |
+
+All three accept the same `BoxConfig` base (preview and bom-xlsx directly; angebot-konfiguration embeds it in `BoxAngebotRequest`).
+
+### `BoxConfig` fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `width_mm` | float | required | Box width (main axis, ≤ 12 000 mm) |
+| `depth_mm` | float | required | Box depth (≤ 2 500 mm) |
+| `height_mm` | float | required | Box height (≤ 3 000 mm) |
+| `with_roof` | bool | `true` | Include roof |
+| `with_floor` | bool | `true` | Include floor |
+| `walls` | enum | `"full"` | `"full"` \| `"half"` \| `"none"` |
+| `wall_material` | enum\|null | `null` | `"wpc"` \| `"realWood"` \| `"glass"` \| `"meshFence"` \| `"meshFenceWithPrivacy"` \| `"corrugatedSheet"` |
+| `wall_wpc_color` | enum\|null | `null` | `"cedar"` \| `"darkGrey"` \| `"teak"` \| `"ipe"` \| `"lightGrey"` |
+| `floor_material` | enum\|null | `null` | `"wpcFloor"` \| `"woodFloor"` |
+| `floor_wpc_color` | enum\|null | `null` | WPC color (see above) |
+| `roller_door` | bool | `false` | Include roller door |
+| `roller_door_color` | string\|null | `null` | RAL code e.g. `"ral9005"` |
+| `with_solar` | bool | `false` | Solar panels on roof |
+| `with_bike_stand` | bool | `true` | Bike rack system |
+| `frame_color` | FrameColor\|null | `null` | Steel frame RAL color (see table above) |
+
+### `/ab1000/angebot-konfiguration` additional fields (`BoxAngebotRequest`)
+
+Embeds `config: BoxConfig` plus customer info and `preise: BoxAngebotPreise`.
+
+#### `BoxAngebotPreise`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `grundkorpus` | float\|null | `null` | Steel frame + roof price |
+| `wand` | float\|null | `null` | Complete wall system price |
+| `boden` | float\|null | `null` | Floor panel price |
+| `rolltor` | float\|null | `null` | Roller door price |
+| `fahrradstaender` | float\|null | `null` | Bike stand price per rack (requires `with_bike_stand = true`) |
+| `solar` | float\|null | `null` | Solar panel price |
+| `solar_pro_panel` | bool | `false` | If `true`, solar price is per panel |
+| `lieferkosten` | float\|null | `null` | Delivery price |
+| `extras` | AngebotPosition[] | `[]` | Additional free-form positions |
 
 ---
 
 ## Technische Vorgaben
 
 ### U-Profile (Schienen)
-| Material | Profil | Außenmaß | Materialstärke |
-|----------|--------|-----------|----------------|
-| Holz | 35 × 35 × 35 mm | 35 mm | 3 mm |
-| WPC  | 25 × 25 × 25 mm | 25 mm | 2 mm |
 
-- **Obere und untere U-Profile** werden durchgehend montiert (volle Spannbreite).
-- **Seitliche U-Profile** erhalten Abstand an den Enden, sodass sie sich nicht mit den horizontalen Profilen kreuzen oder überschneiden.
+| Material | Profil | Materialstärke |
+|----------|--------|----------------|
+| Holz | 35 × 35 × 35 mm | 3 mm |
+| WPC | 25 × 25 × 25 mm | 2 mm |
 
 ### Querbalken
-- Im oberen Bereich ist **alle 450 mm** ein Querbalken vorzusehen.
-- Querbalken laufen in Y-Richtung (Tiefe), gleichmäßig über die Länge verteilt.
-- Anzahl: `n = ceil(span_l / 450)` wobei `span_l = L − 2 × o`
-- Länge pro Querbalken: `span_w = W − 2 × o`
+
+- Im oberen Bereich alle 450 mm ein Querbalken.
+- Anzahl: `n = ceil((L − 2 × o) / 450)`
+- Länge: `W − 2 × o`
 
 ### Füllungen (Wandelemente)
+
 | Material | Höhe pro Element | Materialstärke |
 |----------|-----------------|----------------|
 | Holz | 150 mm | 28 mm |
-| WPC  | 150 mm | 21 mm |
-
-### Bohrungen
-| Typ | Durchmesser |
-|-----|-------------|
-| Eckbohrungen | 15 mm |
-| Rohrbohrungen | 12 mm |
+| WPC | 150 mm | 21 mm |
 
 ### Dachrinne
-- Standardlänge: **2000 mm** pro Abschnitt.
-- Anzahl Abschnitte: `n = ceil(gutter_span / 2000)` wobei `gutter_span = L − 2 × o`
-- Verbindungsstücke: `n − 1` (bei mehreren Abschnitten)
-- Endkappen: immer **2** (links und rechts)
-- Fallrohr: immer **1**
 
-### Zusätzliche Pfeiler (Mittelpfosten)
-Gleiche Logik wie Mittelpost, aber mit tiefenabhängigem Schwellwert:
+- Standardlänge 2 000 mm pro Abschnitt.
+- Anzahl: `n = ceil((L − 2 × o) / 2000)`
+- Verbindungsstücke: `n − 1`, Endkappen: 2, Fallrohr: 1.
 
-| Bedingung | Erster Pfeiler ab Länge |
-|-----------|------------------------|
-| `width_mm > 1500 mm` | `length_mm > 2500 mm` |
-| `width_mm ≤ 1500 mm` | `length_mm > 3500 mm` |
+### Mittelpfosten — Schwellwert
 
-- Folgeintervall bleibt **2500 mm** (wie Mittelpost-Regel).
-- Formel: `first_threshold = 2500 if width_mm > 1500 else 3500`
-- `n_mid_posts = max(0, ceil(max(0, inner_span_l − first_threshold) / 2500))`
+| Bedingung | Erster Pfeiler ab Breite |
+|-----------|--------------------------|
+| `depth_mm > 1500 mm` | `width_mm > 2500 mm` |
+| `depth_mm ≤ 1500 mm` | `width_mm > 3500 mm` |
 
-### Befestigung der Elemente
-| Wandtyp | Befestigungsart |
-|---------|----------------|
-| Doppelstabmattenzaun | Zaunelemente direkt an den Pfosten befestigt |
-| Glaselemente | Klemmprofile an den Pfosten montiert |
-
-- Klemmprofile für Glas: eines pro vertikalem Pfosten → `6 + 2 × n_mid_posts` Stück pro Box.
+Folgeintervall: 2500 mm. Formel: `first_threshold = 2500 if depth_mm > 1500 else 3500`

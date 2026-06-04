@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Optional, List
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class UseCaseType(str, Enum):
@@ -35,6 +35,16 @@ class WallHeight(str, Enum):
     full = "full"
     half = "half"
     none = "none"
+
+class FrameColor(str, Enum):
+    tiefschwarz      = "tiefschwarz"       # RAL 9005
+    verkehrsweiss    = "verkehrsweiss"      # RAL 9016
+    anthrazitgrau    = "anthrazitgrau"      # RAL 7016
+    lichtgrau        = "lichtgrau"          # RAL 7035
+    feuerrot         = "feuerrot"           # RAL 3000
+    enzianblau       = "enzianblau"         # RAL 5010
+    moosgruen        = "moosgruen"          # RAL 6005
+    schokoladenbraun = "schokoladenbraun"   # RAL 8017
 
 class FloorMaterial(str, Enum):
     wpcFloor = "wpcFloor"
@@ -153,14 +163,14 @@ class ComputedConfig(BaseModel):
 # --- AB1000 box configurator ---
 
 class BoxConfig(BaseModel):
-    length_mm: float
     width_mm: float
+    depth_mm: float
     height_mm: float
 
     @model_validator(mode="after")
     def clamp_dimensions(self) -> "BoxConfig":
-        self.length_mm = min(self.length_mm, 12000.0)
-        self.width_mm  = min(self.width_mm,   2500.0)
+        self.width_mm  = min(self.width_mm,  12000.0)
+        self.depth_mm  = min(self.depth_mm,   2500.0)
         self.height_mm = min(self.height_mm,  3000.0)
         return self
     with_roof: bool = True
@@ -172,6 +182,10 @@ class BoxConfig(BaseModel):
     floor_wpc_color: Optional[WpcColor] = None
     roller_door: bool = False
     roller_door_color: Optional[str] = None
+    with_solar: bool = False
+    with_bike_stand: bool = True
+    frame_color: Optional[FrameColor] = Field(default=None, title="Frame Color",
+        description="Steel frame color. Applies to all tubes, connectors, roof substructure and Schienen.")
 
     @field_validator("roller_door_color")
     @classmethod
@@ -183,8 +197,8 @@ class BoxConfig(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "length_mm": 3000,
-                "width_mm": 1500,
+                "width_mm": 3000,
+                "depth_mm": 1500,
                 "height_mm": 2200,
                 "with_roof": True,
                 "with_floor": True,
@@ -195,9 +209,143 @@ class BoxConfig(BaseModel):
                 "floor_wpc_color": "cedar",
                 "roller_door": False,
                 "roller_door_color": None,
+                "with_solar": False,
+                "with_bike_stand": True,
+                "frame_color": "anthrazitgrau",
             }
         }
     }
+
+class AngebotPosition(BaseModel):
+    beschreibung: str
+    menge: float = 1.0
+    einheit: str = "Stk"
+    einzelpreis: float
+
+class AngebotRequest(BaseModel):
+    angebots_nr: str
+    datum: Optional[str] = None          # "DD.MM.YYYY"; defaults to today
+    anrede: Optional[str] = None         # "Herrn", "Frau", …
+    name: str
+    firma: Optional[str] = None
+    strasse: str
+    plz: str
+    ort: str
+    land: str = "Deutschland"
+    kundennummer: Optional[str] = None
+    ansprechpartner: str = "Sven Terhardt"
+    positionen: List[AngebotPosition]
+    mwst_prozent: float = 19.0
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "angebots_nr": "AN-1001",
+                "datum": "04.06.2026",
+                "anrede": "Herrn",
+                "name": "Max Mustermann",
+                "firma": "Musterfirma GmbH",
+                "strasse": "Musterstraße 1",
+                "plz": "12345",
+                "ort": "Musterstadt",
+                "land": "Deutschland",
+                "kundennummer": "1002",
+                "ansprechpartner": "Sven Terhardt",
+                "positionen": [
+                    {
+                        "beschreibung": "Grundkorpus\n4,00 m lang, 2,20 m tief, 2,20 m hoch\nverzinkter Stahl, RAL 7016 anthrazit grau beschichtet\ninklusive Dach und Dachrinne",
+                        "menge": 1.0,
+                        "einheit": "Stk",
+                        "einzelpreis": 3600.0
+                    },
+                    {
+                        "beschreibung": "WPC Holzoptik\nFarbe Teak\n2 Wände 2,00 x 2,20 m\n2 Wände 1,80 x 2,20 m",
+                        "menge": 1.0,
+                        "einheit": "Stk",
+                        "einzelpreis": 1450.0
+                    },
+                    {
+                        "beschreibung": "Lieferkosten",
+                        "menge": 1.0,
+                        "einheit": "Stk",
+                        "einzelpreis": 100.0
+                    }
+                ],
+                "mwst_prozent": 19.0
+            }
+        }
+    }
+
+
+class BoxAngebotPreise(BaseModel):
+    """Prices per component group. Set a field to None to exclude that group from the quote."""
+    grundkorpus:      Optional[float] = None   # steel frame + connectors + roof
+    wand:             Optional[float] = None   # complete wall system (all 3 walls)
+    boden:            Optional[float] = None   # floor panel
+    rolltor:          Optional[float] = None   # roller door
+    fahrradstaender:  Optional[float] = None   # bike stand system (rail + racks)
+    solar:            Optional[float] = None   # solar panels
+    solar_pro_panel:  bool = False             # True → solar price is per panel (qty=n), False → lump sum
+    lieferkosten:     Optional[float] = None   # delivery
+    extras:           List[AngebotPosition] = []  # additional free-form positions appended at the end
+
+class BoxAngebotRequest(BaseModel):
+    config:           BoxConfig
+    preise:           BoxAngebotPreise
+    # Angebot header
+    angebots_nr:      str
+    datum:            Optional[str] = None     # "DD.MM.YYYY"; defaults to today
+    # Customer
+    anrede:           Optional[str] = None
+    name:             str
+    firma:            Optional[str] = None
+    strasse:          str
+    plz:              str
+    ort:              str
+    land:             str = "Deutschland"
+    kundennummer:     Optional[str] = None
+    ansprechpartner:  str = "Sven Terhardt"
+    mwst_prozent:     float = 19.0
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "config": {
+                    "width_mm": 3600, "depth_mm": 2000, "height_mm": 2200,
+                    "with_roof": True, "with_floor": True,
+                    "walls": "full", "wall_material": "wpc", "wall_wpc_color": "teak",
+                    "roller_door": False, "with_solar": False,
+                    "frame_color": "anthrazitgrau",
+                },
+                "preise": {
+                    "grundkorpus": 3060.0,
+                    "wand": 1320.0,
+                    "boden": None,
+                    "rolltor": None,
+                    "fahrradstaender": 290.0,
+                    "solar": None,
+                    "solar_pro_panel": False,
+                    "lieferkosten": 100.0,
+                    "extras": [
+                        {"beschreibung": "LED Lichter\ninklusive", "menge": 1.0, "einheit": "Stk", "einzelpreis": 150.0}
+                    ],
+                },
+                "angebots_nr": "AN-1001",
+                "datum": "04.06.2026",
+                "anrede": "Herrn",
+                "name": "Max Mustermann",
+                "firma": "Musterfirma GmbH",
+                "strasse": "Musterstraße 1",
+                "plz": "12345",
+                "ort": "Musterstadt",
+                "land": "Deutschland",
+                "kundennummer": "1002",
+                "ansprechpartner": "Sven Terhardt",
+                "mwst_prozent": 19.0,
+            }
+        }
+    }
+
 
 class BOMItem(BaseModel):
     component_key: str

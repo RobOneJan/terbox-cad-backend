@@ -21,8 +21,8 @@ def _part(key: str, qty: int, **extra) -> dict:
 
 
 def bom_for_box(
-    length_mm: float,
     width_mm: float,
+    depth_mm: float,
     height_mm: float,
     with_roof: bool = True,
     with_floor: bool = True,
@@ -33,19 +33,21 @@ def bom_for_box(
     floor_wpc_color: str | None = None,
     roller_door: bool = False,
     roller_door_color: str | None = None,
+    with_solar: bool = False,
+    with_bike_stand: bool = True,
 ) -> List[dict]:
     """BOM for a rectangular box using AB1000 connectors and 100×100 tubes."""
     a = _ARM_MM
     o = a - 75  # = 45 mm — tube cross-section center offset from junction center
 
-    L, W, H = length_mm, width_mm, height_mm
+    L, W, H = width_mm, depth_mm, height_mm
     inner_span_l     = L - 2 * o
     inner_span_w     = W - 2 * o
     # Mid-post threshold depends on box depth:
     #   depth > 1500 mm → first post from length > 2500 mm
     #   depth ≤ 1500 mm → first post from length > 3500 mm
     # Subsequent posts every 2500 mm in both cases.
-    first_threshold  = 2500.0 if width_mm > 1500.0 else 3500.0
+    first_threshold  = 2500.0 if depth_mm > 1500.0 else 3500.0
     n_mid_posts      = max(0, math.ceil(max(0.0, inner_span_l - first_threshold) / 2500.0))
     n_side_posts     = max(0, math.ceil(inner_span_w / 2500.0) - 1)
 
@@ -208,6 +210,22 @@ def bom_for_box(
             parts.append(_part("glass_clamp_profile", qty=n_clamp_posts,
                                note="Klemmprofil für Glaselemente"))
 
+    # ── Solar panels ──────────────────────────────────────────────────────────
+    if with_solar and with_roof:
+        _SW, _SD, _GAP = 760.0, 1530.0, 20.0
+        inner_x = L - 2 * o
+        inner_y = W - 2 * o
+        if inner_y >= _SD + 100.0:
+            panel_w = _SW
+        elif inner_y >= _SW + 100.0:
+            panel_w = _SD   # rotated 90°
+        else:
+            panel_w = 0.0
+        if panel_w > 0:
+            n_solar = max(1, int(inner_x / (panel_w + _GAP)))
+            parts.append(_part("solar_panel", qty=n_solar,
+                               note=f"Solarmodul 760×1530 mm × {n_solar}"))
+
     # ── Roller door ───────────────────────────────────────────────────────────
     if roller_door:
         door_note = f"Breite {round(L - 2*o)} mm"
@@ -215,12 +233,11 @@ def bom_for_box(
             door_note += f", {roller_door_color.upper()}"
         parts.append(_part("roller_door", qty=1, note=door_note))
 
-    # ── Bike stands (always present) ──────────────────────────────────────────
-    # One 40×40 mm connecting bar spanning the full inner length at arm-tip height.
-    # N individual P-shaped rack units, natural pitch ≈ 767 mm, minimum 2.
-    total_w  = round(inner_span_l)
-    n_racks  = max(2, round(inner_span_l / 767.0))
-    parts.append(_part("bike_stand_rail", qty=1, note=f"Querrohr 40×40 mm, Länge {total_w} mm"))
-    parts.append(_part("bike_stand",      qty=n_racks, note=f"Fahrradhalter P-Form × {n_racks}"))
+    # ── Bike stands ───────────────────────────────────────────────────────────
+    if with_bike_stand:
+        total_w = round(inner_span_l)
+        n_racks = max(2, round(inner_span_l / 767.0))
+        parts.append(_part("bike_stand_rail", qty=1, note=f"Querrohr 40×40 mm, Länge {total_w} mm"))
+        parts.append(_part("bike_stand", qty=n_racks, note=f"Fahrradhalter P-Form × {n_racks}"))
 
     return parts

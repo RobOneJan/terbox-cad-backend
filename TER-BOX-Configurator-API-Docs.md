@@ -358,7 +358,92 @@ Sends to: `info@ter-box.com`
 
 ---
 
-## 8. Planned API — Design Guidance
+## 8. AB1000 CAD Backend API
+
+The TER BOX CAD backend exposes two endpoints for the AB1000 modular box configurator. Both require the header `X-API-Key`.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/ab1000/preview` | Returns a GLB (binary glTF 2.0) 3D preview |
+| `POST` | `/ab1000/bom` | Returns a bill of materials (JSON) |
+
+### Request Body — `BoxConfig`
+
+```typescript
+interface BoxConfig {
+  // Dimensions (mm) — clamped: length ≤ 12 000, width ≤ 2 500, height ≤ 3 000
+  length_mm: number;
+  width_mm:  number;
+  height_mm: number;
+
+  // Structure
+  with_roof:  boolean;           // default true
+  with_floor: boolean;           // default true
+
+  // Walls
+  walls: "full" | "half" | "none";                         // default "full"
+  wall_material?: "wpc" | "realWood" | "glass" | "meshFence" | "meshFenceWithPrivacy" | "corrugatedSheet";
+  wall_wpc_color?: "cedar" | "darkGrey" | "teak" | "ipe" | "lightGrey";
+
+  // Floor
+  floor_material?:  "wpcFloor" | "woodFloor";
+  floor_wpc_color?: "cedar" | "darkGrey" | "teak" | "ipe" | "lightGrey";
+
+  // Roller door
+  roller_door:        boolean;   // default false
+  roller_door_color?: string;    // RAL code, e.g. "ral9005"
+
+  // Solar panels (requires with_roof: true)
+  with_solar: boolean;           // default false
+
+  // Frame / steel color
+  frame_color?: FrameColor | null;   // default null → steel grey
+}
+
+type FrameColor =
+  | "tiefschwarz"       // RAL 9005 — Tiefschwarz
+  | "verkehrsweiss"     // RAL 9016 — Verkehrsweiß
+  | "anthrazitgrau"     // RAL 7016 — Anthrazitgrau
+  | "lichtgrau"         // RAL 7035 — Lichtgrau
+  | "feuerrot"          // RAL 3000 — Feuerrot
+  | "enzianblau"        // RAL 5010 — Enzianblau
+  | "moosgruen"         // RAL 6005 — Moosgrün
+  | "schokoladenbraun"; // RAL 8017 — Schokoladenbraun
+```
+
+### Frame color notes
+
+- `frame_color` applies to all steel components: connectors (Y-Ecke, L-Ecke, T-Ecke), all tubes, middle posts, roof substructure, bolts, C-channel rails (Schienen), and roller-door housing.
+- When `null` (default), steel grey `#ADADB2` is used.
+- When `roller_door_color` is also set, the door housing uses `roller_door_color`; the rest of the frame keeps `frame_color`.
+
+### `/ab1000/preview` Response
+
+Binary GLB (`model/gltf-binary`), `Content-Disposition: attachment; filename=ab1000_preview.glb`.
+
+### `/ab1000/bom` Response
+
+```typescript
+interface BOMResponse {
+  items: BOMItem[];
+  total_parts: number;
+}
+
+interface BOMItem {
+  component_key: string;
+  article_nr:    string;
+  description:   string;
+  qty:           number;
+  length_mm?:    number;
+  note?:         string;
+}
+```
+
+---
+
+## 10. Planned API — Design Guidance
 
 > [!tip] For AI Assistants
 > This section describes what a new backend API for the configurator should do, based on the existing frontend structure. Use this when generating API endpoint definitions, OpenAPI specs, or backend implementations.
@@ -474,7 +559,7 @@ CREATE TABLE quote_requests (
 
 ---
 
-## 9. i18n — Language System
+## 11. i18n — Language System
 
 **Context**: `src/contexts/LanguageContext.tsx`
 
@@ -493,7 +578,7 @@ An API response does **not** need to be localized — all translations are handl
 
 ---
 
-## 10. Key Observations for API Integration
+## 12. Key Observations for API Integration
 
 > [!important] Things to Know Before Building the API
 
@@ -519,7 +604,7 @@ An API response does **not** need to be localized — all translations are handl
 
 ---
 
-## 11. Component Responsibility Map
+## 13. Component Responsibility Map
 
 | Component | File | Role in configurator |
 |---|---|---|
@@ -532,7 +617,7 @@ An API response does **not** need to be localized — all translations are handl
 
 ---
 
-## 12. Routing Reference
+## 14. Routing Reference
 
 ```
 /                → Index (landing page)
