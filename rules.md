@@ -272,6 +272,22 @@ All structural steel — connectors, tubes, middle posts, roof substructure, bol
 
 ---
 
+## GLB Coordinate System
+
+STEP uses X=width, Y=depth (front→back), Z=up. glTF uses Y=up, +Z toward camera.
+
+Axis remap applied in `generate_ab1000_preview_glb`:
+
+| glTF axis | STEP axis | Formula |
+|-----------|-----------|---------|
+| x | X | `x / 1000` |
+| y | Z (up) | `z / 1000` |
+| z | −Y (depth negated) | `−y / 1000` |
+
+Negating Y flips the front of the box toward the camera (+Z) and produces a proper right-handed rotation (det = +1), so face normals are CCW (correct for standard rendering). **Do not change this sign** — reverting to `+y/1000` puts the back wall in front of the camera and inverts all face normals.
+
+---
+
 ## API Endpoints
 
 Three routes, all require `X-API-Key` header.
