@@ -1113,9 +1113,14 @@ def generate_ab1000_preview_glb(
                                bar_f, stand_rgb))
 
     # --- Write GLB ---
-    # Convert mm → m and remap STEP axes (Z-up) to glTF Y-up: output (x, y, z) = (x/1000, z/1000, y/1000)
+    # Remap STEP (X=width, Y=depth, Z=up) → glTF (Y-up, front faces +Z camera):
+    #   glTF x = STEP x / 1000   (left–right, unchanged)
+    #   glTF y = STEP z / 1000   (up, unchanged)
+    #   glTF z = -STEP y / 1000  (depth negated → front of box faces +Z / camera)
+    # Negating Y changes det from −1 to +1 (proper rotation), so face normals are
+    # now correctly wound CCW for standard front-face rendering.
     mesh_groups = [
-        (name.replace(' ', '_'), [(x/1000, z/1000, y/1000) for x,y,z in verts], faces, rgb)
+        (name.replace(' ', '_'), [(x/1000, z/1000, -y/1000) for x,y,z in verts], faces, rgb)
         for name, verts, faces, rgb in instances if verts
     ]
     return _to_glb(mesh_groups)
